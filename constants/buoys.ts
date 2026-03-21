@@ -27,6 +27,7 @@ export const BUOY_STATIONS: BuoyStation[] = [
 
 export const TIDE_STATION_ID = '1615680';
 export const TIDE_STATION_NAME = 'KAHULUI';
+export const KAHULUI_WIND_STATION_ID = 'KHUL1';
 
 // Map bounds
 export const MAP_BOUNDS = {
