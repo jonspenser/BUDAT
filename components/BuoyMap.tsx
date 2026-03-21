@@ -13,16 +13,22 @@ const MAP_H = H * 0.56;
 const COL = MAP_W / 3;
 const ROW = MAP_H / 3;
 
-// Island projection: fit Hawaii islands tightly inside the center cell
+// Island projection: scale islands to 1.8x the center cell, centered on map
 const I_LON_MIN = -160.8;
 const I_LON_MAX = -154.3;
 const I_LAT_MAX = 22.55;
 const I_LAT_MIN = 18.5;
 
+const ISLAND_SCALE = 1.8;
+const ISLAND_W = COL * ISLAND_SCALE;
+const ISLAND_H = ROW * ISLAND_SCALE;
+const ISLAND_X0 = MAP_W / 2 - ISLAND_W / 2;
+const ISLAND_Y0 = MAP_H / 2 - ISLAND_H / 2;
+
 function projectIsland(lon: number, lat: number) {
   return {
-    x: COL + ((lon - I_LON_MIN) / (I_LON_MAX - I_LON_MIN)) * COL,
-    y: ROW + ((I_LAT_MAX - lat) / (I_LAT_MAX - I_LAT_MIN)) * ROW,
+    x: ISLAND_X0 + ((lon - I_LON_MIN) / (I_LON_MAX - I_LON_MIN)) * ISLAND_W,
+    y: ISLAND_Y0 + ((I_LAT_MAX - lat) / (I_LAT_MAX - I_LAT_MIN)) * ISLAND_H,
   };
 }
 
