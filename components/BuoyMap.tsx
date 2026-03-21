@@ -1,8 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, Dimensions } from 'react-native';
-import Svg, { Polygon, Line } from 'react-native-svg';
-import { ISLANDS } from '../constants/hawaii';
-import { BUOY_STATIONS, Season } from '../constants/buoys';
+import Svg, { Line } from 'react-native-svg';
+import { BUOY_STATIONS } from '../constants/buoys';
 import { BuoyData } from '../hooks/useNDBCData';
 import { COLORS } from '../constants/colors';
 
@@ -82,43 +81,22 @@ function getCornerPos(corner: 'NW' | 'NE' | 'SW' | 'SE') {
 
 interface Props {
   buoyData: Record<string, BuoyData>;
-  season: Season;
+  mode: 'wave' | 'wind';
 }
 
-export default function BuoyMap({ buoyData, season }: Props) {
-  const stations = BUOY_STATIONS.filter(s => s.season.includes(season));
-  const cornerStations = stations.filter(s => s.corner);
-  const nearshoreStations = stations.filter(s => !s.corner);
+export default function BuoyMap({ buoyData }: Props) {
+  const cornerStations = BUOY_STATIONS.filter(s => s.corner);
+  const nearshoreStations = BUOY_STATIONS.filter(s => !s.corner);
 
   return (
     <View style={[styles.container, { width: MAP_W, height: MAP_H }]}>
 
-      {/* SVG layer: island outlines + grid lines */}
+      {/* SVG layer: grid lines */}
       <Svg width={MAP_W} height={MAP_H} style={StyleSheet.absoluteFill}>
-        {/* Grid lines */}
         <Line x1={COL}     y1={0}     x2={COL}     y2={MAP_H} stroke={COLORS.divider} strokeWidth={0.5} />
         <Line x1={2 * COL} y1={0}     x2={2 * COL} y2={MAP_H} stroke={COLORS.divider} strokeWidth={0.5} />
         <Line x1={0}       y1={ROW}   x2={MAP_W}   y2={ROW}   stroke={COLORS.divider} strokeWidth={0.5} />
         <Line x1={0}       y1={2*ROW} x2={MAP_W}   y2={2*ROW} stroke={COLORS.divider} strokeWidth={0.5} />
-
-        {/* Hawaii island outlines in center cell */}
-        {ISLANDS.map(island => {
-          const pts = island.coords
-            .map(([lon, lat]) => {
-              const { x, y } = projectIsland(lon, lat);
-              return `${x},${y}`;
-            })
-            .join(' ');
-          return (
-            <Polygon
-              key={island.name}
-              points={pts}
-              fill="none"
-              stroke={COLORS.mapOutline}
-              strokeWidth={1}
-            />
-          );
-        })}
       </Svg>
 
       {/* Corner buoys */}
