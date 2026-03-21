@@ -1,164 +1,172 @@
-import React, { useRef, useState } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
-  Dimensions,
-  StatusBar,
+  FlatList,
+  TouchableOpacity,
   SafeAreaView,
-  ActivityIndicator,
+  StatusBar,
 } from 'react-native';
-import BuoyMap from '../components/BuoyMap';
-import TideChart from '../components/TideChart';
-import { useNDBCData } from '../hooks/useNDBCData';
-import { useTideData } from '../hooks/useTideData';
-import { useKahuluiWind } from '../hooks/useKahuluiWind';
+import { useRouter } from 'expo-router';
 import { COLORS } from '../constants/colors';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+export interface Issue {
+  id: string;
+  title: string;
+  description: string;
+  submittedAt: string;
+  voteCount?: number;
+}
 
-const PAGES = [
-  { key: 'wave', label: 'DATA' },
-  { key: 'wind', label: 'WIND' },
-];
+// Global issue store (replace with DB later)
+export const issueStore: Issue[] = [];
 
-export default function Index() {
-  const { data: buoyData, loading } = useNDBCData();
-  const tideData = useTideData();
-  const kahuluiWind = useKahuluiWind();
-  const [pageIndex, setPageIndex] = useState(0);
-  const scrollRef = useRef<ScrollView>(null);
+export default function Home() {
+  const router = useRouter();
+  const [issues, setIssues] = useState<Issue[]>(issueStore);
 
-  function onScroll(e: any) {
-    const x = e.nativeEvent.contentOffset.x;
-    const idx = Math.round(x / SCREEN_WIDTH);
-    setPageIndex(idx);
-  }
+  const refresh = () => setIssues([...issueStore]);
 
   return (
     <SafeAreaView style={styles.safe}>
-      <StatusBar barStyle="light-content" backgroundColor="#000" />
+      <StatusBar barStyle="light-content" backgroundColor={COLORS.bg} />
 
-      {/* Header */}
       <View style={styles.header}>
         <View>
-          <Text style={styles.title}>BUDAT</Text>
-          <Text style={styles.subtitle}>NOAA Real-Time Wave Data</Text>
-        </View>
-        <View style={styles.dots}>
-          {PAGES.map((_, i) => (
-            <View
-              key={i}
-              style={[
-                styles.dot,
-                i === pageIndex ? styles.dotActive : styles.dotInactive,
-              ]}
-            />
-          ))}
+          <Text style={styles.title}>GROUPTHINK</Text>
+          <Text style={styles.subtitle}>AI agents solving world problems</Text>
         </View>
       </View>
 
       <View style={styles.divider} />
 
-      {/* Swipeable map area */}
-      <View style={styles.mapArea}>
-        {loading ? (
-          <View style={styles.loading}>
-            <ActivityIndicator color={COLORS.primary} />
-          </View>
-        ) : (
-          <ScrollView
-            ref={scrollRef}
-            horizontal
-            pagingEnabled
-            showsHorizontalScrollIndicator={false}
-            onMomentumScrollEnd={onScroll}
-          >
-            {PAGES.map(page => (
-              <View key={page.key} style={{ width: SCREEN_WIDTH }}>
-                <BuoyMap
-                  buoyData={buoyData}
-                  mode={page.key as 'wave' | 'wind'}
-                  kahuluiWind={kahuluiWind}
-                />
+      {issues.length === 0 ? (
+        <View style={styles.empty}>
+          <Text style={styles.emptyText}>No issues submitted yet.</Text>
+          <Text style={styles.emptySubtext}>Be the first to submit a world problem.</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={issues}
+          keyExtractor={i => i.id}
+          contentContainerStyle={styles.list}
+          onRefresh={refresh}
+          refreshing={false}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={styles.card}
+              onPress={() => router.push({ pathname: '/vote', params: { issueId: item.id } })}
+            >
+              <Text style={styles.cardTitle}>{item.title}</Text>
+              <Text style={styles.cardDesc} numberOfLines={2}>{item.description}</Text>
+              <View style={styles.cardFooter}>
+                <Text style={styles.cardMeta}>{item.submittedAt}</Text>
+                {item.voteCount !== undefined && (
+                  <Text style={styles.cardVotes}>⚡ {item.voteCount} agent votes</Text>
+                )}
               </View>
-            ))}
-          </ScrollView>
-        )}
-        <Text style={styles.swipeHint}>
-          SWIPE → {PAGES.map(p => p.label).join(' | ')}
-        </Text>
-      </View>
+            </TouchableOpacity>
+          )}
+        />
+      )}
 
-      <View style={styles.divider} />
-
-      {/* Tide chart */}
-      <TideChart data={tideData} />
+      <TouchableOpacity
+        style={styles.fab}
+        onPress={() => router.push('/submit')}
+      >
+        <Text style={styles.fabText}>+ SUBMIT ISSUE</Text>
+      </TouchableOpacity>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: '#000',
-  },
+  safe: { flex: 1, backgroundColor: COLORS.bg },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 8,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 12,
   },
   title: {
     fontFamily: 'Courier',
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: 'bold',
     color: COLORS.primary,
-    letterSpacing: 2,
+    letterSpacing: 3,
   },
   subtitle: {
     fontFamily: 'Courier',
     fontSize: 11,
     color: COLORS.dim,
     letterSpacing: 1,
+    marginTop: 2,
   },
-  dots: {
-    flexDirection: 'row',
-    gap: 6,
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  dotActive: {
-    backgroundColor: COLORS.pageDotActive,
-  },
-  dotInactive: {
-    backgroundColor: COLORS.pageDotInactive,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: COLORS.divider,
-  },
-  mapArea: {
-    flex: 1,
-  },
-  loading: {
+  divider: { height: 1, backgroundColor: COLORS.border },
+  empty: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    gap: 8,
   },
-  swipeHint: {
-    position: 'absolute',
-    bottom: 8,
-    alignSelf: 'center',
+  emptyText: {
+    fontFamily: 'Courier',
+    fontSize: 16,
+    color: COLORS.text,
+  },
+  emptySubtext: {
+    fontFamily: 'Courier',
+    fontSize: 12,
+    color: COLORS.dim,
+  },
+  list: { padding: 16, gap: 12 },
+  card: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 16,
+    gap: 6,
+  },
+  cardTitle: {
+    fontFamily: 'Courier',
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: COLORS.text,
+  },
+  cardDesc: {
+    fontFamily: 'Courier',
+    fontSize: 12,
+    color: COLORS.dim,
+    lineHeight: 18,
+  },
+  cardFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 4,
+  },
+  cardMeta: {
     fontFamily: 'Courier',
     fontSize: 10,
     color: COLORS.dim,
-    letterSpacing: 1,
+  },
+  cardVotes: {
+    fontFamily: 'Courier',
+    fontSize: 10,
+    color: COLORS.accent,
+  },
+  fab: {
+    margin: 16,
+    backgroundColor: COLORS.primary,
+    borderRadius: 8,
+    padding: 16,
+    alignItems: 'center',
+  },
+  fabText: {
+    fontFamily: 'Courier',
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#fff',
+    letterSpacing: 2,
   },
 });

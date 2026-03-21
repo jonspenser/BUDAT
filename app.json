@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "BUDAT3",
-    "slug": "BUDAT3",
+    "name": "GROUPTHINK",
+    "slug": "GROUPTHINK",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -10,14 +10,6 @@
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
-    },
-    "updates": {
-      "url": "https://u.expo.dev/BUDAT3",
-      "enabled": true,
-      "checkAutomatically": "ON_LOAD"
-    },
-    "runtimeVersion": {
-      "policy": "appVersion"
     },
     "ios": {
       "supportsTablet": true
@@ -33,6 +25,10 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "scheme": "groupthink",
+    "plugins": [
+      "expo-router"
+    ]
   }
 }
