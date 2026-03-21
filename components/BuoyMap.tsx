@@ -167,11 +167,13 @@ export default function BuoyMap({ buoyData, season }: Props) {
       {nearshoreStations.map(station => {
         const d = buoyData[station.id];
         const { x, y } = projectIsland(station.lon, station.lat);
+        const ox = station.labelOffset?.x ?? 0;
+        const oy = station.labelOffset?.y ?? 0;
 
         return (
           <View
             key={station.id}
-            style={[styles.nearshoreWrap, { left: x - 45, top: y - 40 }]}
+            style={[styles.nearshoreWrap, { left: x - 45 + ox, top: y - 40 + oy }]}
           >
             <Text style={styles.nearshoreDeg}>
               {d?.directionDeg !== null && d?.directionDeg !== undefined
@@ -187,9 +189,12 @@ export default function BuoyMap({ buoyData, season }: Props) {
             />
             <Text style={styles.nearshoreName}>{station.name}</Text>
             {d?.waveHeightFt !== null && d?.waveHeightFt !== undefined && (
-              <Text style={styles.nearshoreData}>
-                {d.waveHeightFt}ft  {d.periodSec !== null ? `${d.periodSec}s` : ''}
-              </Text>
+              <>
+                <Text style={styles.nearshoreData}>{d.waveHeightFt}ft</Text>
+                {d.periodSec !== null && (
+                  <Text style={styles.nearshoreData}>{d.periodSec}s</Text>
+                )}
+              </>
             )}
             {d?.timestamp && (
               <Text style={styles.nearshoreTime}>{d.timestamp}</Text>
