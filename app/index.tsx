@@ -9,20 +9,20 @@ import {
   SafeAreaView,
   ActivityIndicator,
 } from 'react-native';
-import BuoyMap from './components/BuoyMap';
-import TideChart from './components/TideChart';
-import { useNDBCData } from './hooks/useNDBCData';
-import { useTideData } from './hooks/useTideData';
-import { COLORS } from './constants/colors';
+import BuoyMap from '../components/BuoyMap';
+import TideChart from '../components/TideChart';
+import { useNDBCData } from '../hooks/useNDBCData';
+import { useTideData } from '../hooks/useTideData';
+import { COLORS } from '../constants/colors';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 const PAGES = [
-  { key: 'summer', label: 'SUMMER' },
-  { key: 'winter', label: 'WINTER' },
+  { key: 'wave', label: 'DATA' },
+  { key: 'wind', label: 'WIND' },
 ];
 
-export default function App() {
+export default function Index() {
   const { data: buoyData, loading } = useNDBCData();
   const tideData = useTideData();
   const [pageIndex, setPageIndex] = useState(0);
@@ -77,14 +77,14 @@ export default function App() {
               <View key={page.key} style={{ width: SCREEN_WIDTH }}>
                 <BuoyMap
                   buoyData={buoyData}
-                  season={page.key as 'summer' | 'winter'}
+                  mode={page.key as 'wave' | 'wind'}
                 />
               </View>
             ))}
           </ScrollView>
         )}
         <Text style={styles.swipeHint}>
-          SWIPE → SUMMER | WINTER
+          SWIPE → {PAGES.map(p => p.label).join(' | ')}
         </Text>
       </View>
 
