@@ -13,6 +13,7 @@ import BuoyMap from '../components/BuoyMap';
 import TideChart from '../components/TideChart';
 import { useNDBCData } from '../hooks/useNDBCData';
 import { useTideData } from '../hooks/useTideData';
+import { useKahuluiWind } from '../hooks/useKahuluiWind';
 import { COLORS } from '../constants/colors';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -25,6 +26,7 @@ const PAGES = [
 export default function Index() {
   const { data: buoyData, loading } = useNDBCData();
   const tideData = useTideData();
+  const kahuluiWind = useKahuluiWind();
   const [pageIndex, setPageIndex] = useState(0);
   const scrollRef = useRef<ScrollView>(null);
 
@@ -78,6 +80,7 @@ export default function Index() {
                 <BuoyMap
                   buoyData={buoyData}
                   mode={page.key as 'wave' | 'wind'}
+                  kahuluiWind={kahuluiWind}
                 />
               </View>
             ))}

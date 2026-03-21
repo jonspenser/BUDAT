@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { BUOY_STATIONS, BuoyStation, KAHULUI_WIND_STATION_ID } from '../constants/buoys';
+import { BUOY_STATIONS } from '../constants/buoys';
 
 export interface BuoyData {
   stationId: string;
@@ -64,19 +64,11 @@ export function useNDBCData() {
 
   const refresh = useCallback(async () => {
     setLoading(true);
-    const kahuluiWindStation: BuoyStation = {
-      id: KAHULUI_WIND_STATION_ID,
-      name: 'KAHULUI',
-      lat: 20.9,
-      lon: -156.47,
-      season: ['winter', 'summer'],
-    };
-    const allStations = [...BUOY_STATIONS, kahuluiWindStation];
-    const results = await Promise.allSettled(allStations.map(fetchBuoy));
+    const results = await Promise.allSettled(BUOY_STATIONS.map(fetchBuoy));
     const map: Record<string, BuoyData> = {};
     results.forEach((r, i) => {
       if (r.status === 'fulfilled') {
-        map[allStations[i].id] = r.value;
+        map[BUOY_STATIONS[i].id] = r.value;
       }
     });
     setData(map);

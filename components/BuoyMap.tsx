@@ -1,8 +1,9 @@
 import React from 'react';
 import { View, Text, StyleSheet, Dimensions } from 'react-native';
 import Svg, { Line } from 'react-native-svg';
-import { BUOY_STATIONS, KAHULUI_WIND_STATION_ID } from '../constants/buoys';
+import { BUOY_STATIONS } from '../constants/buoys';
 import { BuoyData } from '../hooks/useNDBCData';
+import { KahuluiWindData } from '../hooks/useKahuluiWind';
 import { COLORS } from '../constants/colors';
 
 const { width: W, height: H } = Dimensions.get('window');
@@ -82,9 +83,10 @@ function getCornerPos(corner: 'NW' | 'NE' | 'SW' | 'SE') {
 interface Props {
   buoyData: Record<string, BuoyData>;
   mode: 'wave' | 'wind';
+  kahuluiWind: KahuluiWindData;
 }
 
-export default function BuoyMap({ buoyData }: Props) {
+export default function BuoyMap({ buoyData, kahuluiWind }: Props) {
   const cornerStations = BUOY_STATIONS.filter(s => s.corner);
   const nearshoreStations = BUOY_STATIONS.filter(s => !s.corner);
 
@@ -142,40 +144,35 @@ export default function BuoyMap({ buoyData }: Props) {
       })}
 
       {/* Bottom center: Kahului wind */}
-      {(() => {
-        const d = buoyData[KAHULUI_WIND_STATION_ID];
-        return (
-          <View
-            style={[
-              styles.cornerCell,
-              styles.cornerLeft,
-              { left: COL, top: 2 * ROW, width: COL, height: ROW, alignItems: 'center' },
-            ]}
-          >
-            <Text style={styles.cornerDeg}>
-              {d?.windDirDeg !== null && d?.windDirDeg !== undefined
-                ? `${Math.round(d.windDirDeg)} °`
-                : '--'}
-            </Text>
-            <ArrowSvg
-              size={80}
-              directionDeg={d?.windDirDeg ?? null}
-              heightFt={d?.windSpeedKts !== null && d?.windSpeedKts !== undefined ? d.windSpeedKts / 6 : null}
-              periodSec={10}
-              scale={1.2}
-            />
-            <Text style={styles.cornerName}>KAHULUI</Text>
-            {d?.windSpeedKts !== null && d?.windSpeedKts !== undefined ? (
-              <Text style={styles.cornerData}>{d.windSpeedKts}kts</Text>
-            ) : (
-              <Text style={styles.cornerData}>--</Text>
-            )}
-            {d?.timestamp && (
-              <Text style={styles.cornerTime}>{d.timestamp}</Text>
-            )}
-          </View>
-        );
-      })()}
+      <View
+        style={[
+          styles.cornerCell,
+          { left: COL, top: 2 * ROW, width: COL, height: ROW, alignItems: 'center' },
+        ]}
+      >
+        <Text style={styles.cornerDeg}>
+          {kahuluiWind.windDirDeg !== null ? `${kahuluiWind.windDirDeg} °` : '--'}
+        </Text>
+        <ArrowSvg
+          size={80}
+          directionDeg={kahuluiWind.windDirDeg}
+          heightFt={kahuluiWind.windSpeedKts !== null ? kahuluiWind.windSpeedKts / 6 : null}
+          periodSec={10}
+          scale={1.2}
+        />
+        <Text style={styles.cornerName}>KAHULUI</Text>
+        {kahuluiWind.windSpeedKts !== null ? (
+          <Text style={styles.cornerData}>
+            {kahuluiWind.windSpeedKts}kts
+            {kahuluiWind.gustKts !== null ? `  G${kahuluiWind.gustKts}` : ''}
+          </Text>
+        ) : (
+          <Text style={styles.cornerData}>--</Text>
+        )}
+        {kahuluiWind.timestamp && (
+          <Text style={styles.cornerTime}>{kahuluiWind.timestamp}</Text>
+        )}
+      </View>
 
       {/* Nearshore buoys overlaid on island map */}
       {nearshoreStations.map(station => {
