@@ -6,8 +6,9 @@ import {
   SafeAreaView,
   ScrollView,
   Animated,
+  TouchableOpacity,
 } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { COLORS } from '../constants/colors';
 import { AGENT_TYPES } from '../constants/agents';
 import { agentVote, VoteResult } from '../services/claude';
@@ -25,6 +26,7 @@ interface AgentStatus {
 
 export default function Vote() {
   const { issueId } = useLocalSearchParams<{ issueId: string }>();
+  const router = useRouter();
   const issue = issueStore.find(i => i.id === issueId);
 
   const [agents, setAgents] = useState<AgentStatus[]>(
@@ -191,6 +193,17 @@ export default function Vote() {
             ))}
           </>
         )}
+
+        {/* Deliberation CTA */}
+        {phase === 'done' && (
+          <TouchableOpacity
+            style={styles.deliberateBtn}
+            onPress={() => router.push({ pathname: '/deliberate', params: { issueId: issue?.id } })}
+          >
+            <Text style={styles.deliberateBtnText}>START DELIBERATION →</Text>
+            <Text style={styles.deliberateBtnSub}>12 agents tackle this issue together</Text>
+          </TouchableOpacity>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -329,5 +342,26 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: COLORS.dim,
     lineHeight: 16,
+  },
+  deliberateBtn: {
+    backgroundColor: COLORS.primary,
+    borderRadius: 8,
+    padding: 18,
+    alignItems: 'center',
+    marginTop: 24,
+    gap: 4,
+  },
+  deliberateBtnText: {
+    fontFamily: 'Courier',
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#fff',
+    letterSpacing: 2,
+  },
+  deliberateBtnSub: {
+    fontFamily: 'Courier',
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.6)',
+    letterSpacing: 1,
   },
 });
