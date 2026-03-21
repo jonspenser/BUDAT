@@ -12,7 +12,7 @@ export interface BuoyStation {
 export const BUOY_STATIONS: BuoyStation[] = [
   // Offshore corner buoys
   { id: '51001', name: 'NW', lat: 23.4,  lon: -162.2, corner: 'NW', season: ['winter'] },
-  { id: '51101', name: 'NE', lat: 24.3,  lon: -157.8, corner: 'NE', season: ['winter'] },
+  { id: '51003', name: 'NE', lat: 19.2,  lon: -160.6, corner: 'NE', season: ['winter'] },
   { id: '51002', name: 'SW', lat: 17.1,  lon: -157.7, corner: 'SW', season: ['summer'] },
   { id: '51004', name: 'SE', lat: 17.5,  lon: -152.4, corner: 'SE', season: ['summer'] },
   // Nearshore buoys

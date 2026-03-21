@@ -26,6 +26,22 @@ export default function App() {
   const { data: buoyData, loading } = useNDBCData();
   const tideData = useTideData();
   const [pageIndex, setPageIndex] = useState(0);
+
+  // Current tide height — find the closest prediction to now
+  const currentTideHeight = (() => {
+    if (!tideData?.predictions?.length) return null;
+    const now = new Date();
+    const nowMins = now.getHours() * 60 + now.getMinutes();
+    let closest = tideData.predictions[0];
+    let minDiff = Infinity;
+    for (const p of tideData.predictions) {
+      const parts = p.t.split(' ')[1]?.split(':') ?? [];
+      const mins = (+parts[0]) * 60 + (+parts[1]);
+      const diff = Math.abs(mins - nowMins);
+      if (diff < minDiff) { minDiff = diff; closest = p; }
+    }
+    return parseFloat(closest.v);
+  })();
   const scrollRef = useRef<ScrollView>(null);
 
   function onScroll(e: any) {
@@ -72,12 +88,15 @@ export default function App() {
             pagingEnabled
             showsHorizontalScrollIndicator={false}
             onMomentumScrollEnd={onScroll}
+            style={{ flex: 1 }}
+            contentContainerStyle={{ flexGrow: 1 }}
           >
             {PAGES.map(page => (
-              <View key={page.key} style={{ width: SCREEN_WIDTH }}>
+              <View key={page.key} style={{ width: SCREEN_WIDTH, flex: 1 }}>
                 <BuoyMap
                   buoyData={buoyData}
                   season={page.key as 'summer' | 'winter'}
+                  currentTideHeight={currentTideHeight}
                 />
               </View>
             ))}
