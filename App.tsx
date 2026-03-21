@@ -18,8 +18,8 @@ import { COLORS } from './constants/colors';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 const PAGES = [
-  { key: 'summer', label: 'SUMMER' },
-  { key: 'winter', label: 'WINTER' },
+  { key: 'wave', label: 'DATA' },
+  { key: 'wind', label: 'WIND' },
 ];
 
 export default function App() {
@@ -77,14 +77,14 @@ export default function App() {
               <View key={page.key} style={{ width: SCREEN_WIDTH }}>
                 <BuoyMap
                   buoyData={buoyData}
-                  season={page.key as 'summer' | 'winter'}
+                  mode={page.key as 'wave' | 'wind'}
                 />
               </View>
             ))}
           </ScrollView>
         )}
         <Text style={styles.swipeHint}>
-          SWIPE → SUMMER | WINTER
+          SWIPE → DATA | WIND
         </Text>
       </View>
 
