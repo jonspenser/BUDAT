@@ -8,7 +8,9 @@ import {
   StatusBar,
   SafeAreaView,
   ActivityIndicator,
+  TouchableOpacity,
 } from 'react-native';
+import { useRouter } from 'expo-router';
 import BuoyMap from '../components/BuoyMap';
 import TideChart from '../components/TideChart';
 import { useNDBCData } from '../hooks/useNDBCData';
@@ -27,6 +29,7 @@ export default function Index() {
   const tideData = useTideData();
   const [pageIndex, setPageIndex] = useState(0);
   const scrollRef = useRef<ScrollView>(null);
+  const router = useRouter();
 
   function onScroll(e: any) {
     const x = e.nativeEvent.contentOffset.x;
@@ -44,16 +47,21 @@ export default function Index() {
           <Text style={styles.title}>BUDAT</Text>
           <Text style={styles.subtitle}>NOAA Real-Time Wave Data</Text>
         </View>
-        <View style={styles.dots}>
-          {PAGES.map((_, i) => (
-            <View
-              key={i}
-              style={[
-                styles.dot,
-                i === pageIndex ? styles.dotActive : styles.dotInactive,
-              ]}
-            />
-          ))}
+        <View style={styles.headerRight}>
+          <View style={styles.dots}>
+            {PAGES.map((_, i) => (
+              <View
+                key={i}
+                style={[
+                  styles.dot,
+                  i === pageIndex ? styles.dotActive : styles.dotInactive,
+                ]}
+              />
+            ))}
+          </View>
+          <TouchableOpacity onPress={() => router.push('/drone')} style={styles.droneBtn}>
+            <Text style={styles.droneBtnText}>DRONE</Text>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -122,9 +130,27 @@ const styles = StyleSheet.create({
     color: COLORS.dim,
     letterSpacing: 1,
   },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
   dots: {
     flexDirection: 'row',
     gap: 6,
+  },
+  droneBtn: {
+    borderWidth: 1,
+    borderColor: COLORS.dim,
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  droneBtnText: {
+    fontFamily: 'Courier',
+    fontSize: 10,
+    color: COLORS.dim,
+    letterSpacing: 2,
   },
   dot: {
     width: 8,
