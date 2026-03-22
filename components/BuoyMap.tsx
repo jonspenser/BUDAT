@@ -1,8 +1,8 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, LayoutChangeEvent } from 'react-native';
+import { View, Text, StyleSheet, LayoutChangeEvent, TouchableOpacity, Modal, Pressable } from 'react-native';
 import Svg, { Polygon, Line } from 'react-native-svg';
 import { ISLANDS } from '../constants/hawaii';
-import { BUOY_STATIONS, Season } from '../constants/buoys';
+import { BUOY_STATIONS, BuoyStation, Season } from '../constants/buoys';
 import { BuoyData } from '../hooks/useNDBCData';
 import { COLORS } from '../constants/colors';
 
@@ -69,6 +69,7 @@ interface Props {
 
 export default function BuoyMap({ buoyData, season, currentTideHeight }: Props) {
   const [size, setSize] = useState({ w: 0, h: 0 });
+  const [selected, setSelected] = useState<{ station: BuoyStation; data: BuoyData | null } | null>(null);
 
   const onLayout = useCallback((e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;
@@ -128,8 +129,10 @@ export default function BuoyMap({ buoyData, season, currentTideHeight }: Props) 
             const isRight = station.corner === 'NE' || station.corner === 'SE';
 
             return (
-              <View
+              <TouchableOpacity
                 key={station.id}
+                activeOpacity={0.7}
+                onPress={() => setSelected({ station, data: d ?? null })}
                 style={[
                   styles.cornerCell,
                   { left: pos.left, top: pos.top, width: col, height: row },
@@ -152,7 +155,7 @@ export default function BuoyMap({ buoyData, season, currentTideHeight }: Props) 
                   {d?.periodSec != null ? `${d.periodSec}s` : ''}
                 </Text>
                 {d?.timestamp ? <Text style={styles.cornerTime}>{d.timestamp}</Text> : null}
-              </View>
+              </TouchableOpacity>
             );
           })}
 
@@ -162,8 +165,10 @@ export default function BuoyMap({ buoyData, season, currentTideHeight }: Props) 
             const p = projectIsland(station.lon, station.lat);
 
             return (
-              <View
+              <TouchableOpacity
                 key={station.id}
+                activeOpacity={0.7}
+                onPress={() => setSelected({ station, data: d ?? null })}
                 style={[styles.nearshoreWrap, { left: p.x - 40, top: p.y - 14 }]}
               >
                 <Text style={styles.nearshoreDeg}>
@@ -182,7 +187,7 @@ export default function BuoyMap({ buoyData, season, currentTideHeight }: Props) 
                   </Text>
                 )}
                 {d?.timestamp ? <Text style={styles.nearshoreTime}>{d.timestamp}</Text> : null}
-              </View>
+              </TouchableOpacity>
             );
           })}
           {/* Kahului — bottom center cell */}
@@ -194,6 +199,48 @@ export default function BuoyMap({ buoyData, season, currentTideHeight }: Props) 
           </View>
         </>
       )}
+      {/* Station detail modal */}
+      <Modal
+        visible={selected !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSelected(null)}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={() => setSelected(null)}>
+          <Pressable style={styles.modalCard} onPress={() => {}}>
+            <Text style={styles.modalTitle}>{selected?.station.name}</Text>
+            <Text style={styles.modalId}>STATION {selected?.station.id}</Text>
+            <View style={styles.modalDivider} />
+            <View style={styles.modalRow}>
+              <Text style={styles.modalLabel}>HEIGHT</Text>
+              <Text style={styles.modalValue}>
+                {selected?.data?.waveHeightFt != null ? `${selected.data.waveHeightFt} ft` : '-- ft'}
+              </Text>
+            </View>
+            <View style={styles.modalRow}>
+              <Text style={styles.modalLabel}>PERIOD</Text>
+              <Text style={styles.modalValue}>
+                {selected?.data?.periodSec != null ? `${selected.data.periodSec} s` : '-- s'}
+              </Text>
+            </View>
+            <View style={styles.modalRow}>
+              <Text style={styles.modalLabel}>DIRECTION</Text>
+              <Text style={styles.modalValue}>
+                {selected?.data?.directionDeg != null ? `${Math.round(selected.data.directionDeg)} °` : '--'}
+              </Text>
+            </View>
+            <View style={styles.modalRow}>
+              <Text style={styles.modalLabel}>UPDATED</Text>
+              <Text style={styles.modalValue}>
+                {selected?.data?.timestamp ?? '--'}
+              </Text>
+            </View>
+            <TouchableOpacity style={styles.modalClose} onPress={() => setSelected(null)}>
+              <Text style={styles.modalCloseText}>CLOSE</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -285,5 +332,68 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: COLORS.primary,
     marginTop: 4,
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalCard: {
+    backgroundColor: '#0D0D0D',
+    borderWidth: 1,
+    borderColor: COLORS.divider,
+    borderRadius: 4,
+    padding: 20,
+    width: 260,
+  },
+  modalTitle: {
+    fontFamily: 'Courier',
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: COLORS.primary,
+    letterSpacing: 2,
+  },
+  modalId: {
+    fontFamily: 'Courier',
+    fontSize: 11,
+    color: COLORS.dim,
+    letterSpacing: 1,
+    marginTop: 2,
+  },
+  modalDivider: {
+    height: 1,
+    backgroundColor: COLORS.divider,
+    marginVertical: 12,
+  },
+  modalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  modalLabel: {
+    fontFamily: 'Courier',
+    fontSize: 12,
+    color: COLORS.dim,
+    letterSpacing: 1,
+  },
+  modalValue: {
+    fontFamily: 'Courier',
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: COLORS.primary,
+  },
+  modalClose: {
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: COLORS.divider,
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  modalCloseText: {
+    fontFamily: 'Courier',
+    fontSize: 12,
+    color: COLORS.dim,
+    letterSpacing: 2,
   },
 });
