@@ -8,9 +8,7 @@ import {
   StatusBar,
   SafeAreaView,
   ActivityIndicator,
-  TouchableOpacity,
 } from 'react-native';
-import { useRouter } from 'expo-router';
 import BuoyMap from '../components/BuoyMap';
 import TideChart from '../components/TideChart';
 import { useNDBCData } from '../hooks/useNDBCData';
@@ -29,7 +27,6 @@ export default function Index() {
   const tideData = useTideData();
   const [pageIndex, setPageIndex] = useState(0);
   const scrollRef = useRef<ScrollView>(null);
-  const router = useRouter();
 
   function onScroll(e: any) {
     const x = e.nativeEvent.contentOffset.x;
@@ -47,21 +44,16 @@ export default function Index() {
           <Text style={styles.title}>BUDAT</Text>
           <Text style={styles.subtitle}>NOAA Real-Time Wave Data</Text>
         </View>
-        <View style={styles.headerRight}>
-          <View style={styles.dots}>
-            {PAGES.map((_, i) => (
-              <View
-                key={i}
-                style={[
-                  styles.dot,
-                  i === pageIndex ? styles.dotActive : styles.dotInactive,
-                ]}
-              />
-            ))}
-          </View>
-          <TouchableOpacity style={styles.breatheBtn} onPress={() => router.push('/breathe')}>
-            <Text style={styles.breatheBtnText}>BREATHE</Text>
-          </TouchableOpacity>
+        <View style={styles.dots}>
+          {PAGES.map((_, i) => (
+            <View
+              key={i}
+              style={[
+                styles.dot,
+                i === pageIndex ? styles.dotActive : styles.dotInactive,
+              ]}
+            />
+          ))}
         </View>
       </View>
 
@@ -130,26 +122,9 @@ const styles = StyleSheet.create({
     color: COLORS.dim,
     letterSpacing: 1,
   },
-  headerRight: {
-    alignItems: 'flex-end',
-    gap: 6,
-  },
   dots: {
     flexDirection: 'row',
     gap: 6,
-  },
-  breatheBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderWidth: 1,
-    borderColor: COLORS.divider,
-    borderRadius: 4,
-  },
-  breatheBtnText: {
-    fontFamily: 'Courier',
-    fontSize: 10,
-    color: COLORS.dim,
-    letterSpacing: 1,
   },
   dot: {
     width: 8,
