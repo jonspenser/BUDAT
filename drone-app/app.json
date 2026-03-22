@@ -1,0 +1,17 @@
+{
+  "expo": {
+    "name": "Drone Click Control",
+    "slug": "drone-click-control",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "droneclick",
+    "userInterfaceStyle": "dark",
+    "platforms": ["ios", "android", "web"],
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#000000"
+      }
+    },
+    "plugins": ["expo-router"]
+  }
+}
