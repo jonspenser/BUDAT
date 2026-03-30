@@ -11,15 +11,45 @@ import {
 } from 'react-native';
 import BuoyMap from '../components/BuoyMap';
 import TideChart from '../components/TideChart';
+import AnalogActivities from '../components/AnalogActivities';
 import { useNDBCData } from '../hooks/useNDBCData';
 import { useTideData } from '../hooks/useTideData';
+import { Season } from '../constants/buoys';
 import { COLORS } from '../constants/colors';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
+function currentSeason(): Season {
+  const month = new Date().getMonth() + 1; // 1–12
+  return month >= 5 && month <= 9 ? 'summer' : 'winter';
+}
+
+function getCurrentTideHeight(tideData: ReturnType<typeof useTideData>): number | null {
+  if (!tideData || tideData.predictions.length === 0) return null;
+  const now = new Date();
+  const nowMins = now.getHours() * 60 + now.getMinutes();
+  const preds = tideData.predictions;
+  for (let i = 0; i < preds.length - 1; i++) {
+    const parseParts = (t: string) => {
+      const parts = t.split(' ');
+      const [h, m] = parts[1]?.split(':').map(Number) ?? [0, 0];
+      return h * 60 + m;
+    };
+    const m0 = parseParts(preds[i].t);
+    const m1 = parseParts(preds[i + 1].t);
+    if (nowMins >= m0 && nowMins <= m1) {
+      const t = (nowMins - m0) / (m1 - m0);
+      const h0 = parseFloat(preds[i].v);
+      const h1 = parseFloat(preds[i + 1].v);
+      return Math.round((h0 + t * (h1 - h0)) * 10) / 10;
+    }
+  }
+  return null;
+}
+
 const PAGES = [
   { key: 'wave', label: 'DATA' },
-  { key: 'wind', label: 'WIND' },
+  { key: 'activities', label: 'ACTIVITIES' },
 ];
 
 export default function Index() {
@@ -27,6 +57,8 @@ export default function Index() {
   const tideData = useTideData();
   const [pageIndex, setPageIndex] = useState(0);
   const scrollRef = useRef<ScrollView>(null);
+  const season = currentSeason();
+  const currentTideHeight = getCurrentTideHeight(tideData);
 
   function onScroll(e: any) {
     const x = e.nativeEvent.contentOffset.x;
@@ -59,7 +91,7 @@ export default function Index() {
 
       <View style={styles.divider} />
 
-      {/* Swipeable map area */}
+      {/* Swipeable area */}
       <View style={styles.mapArea}>
         {loading ? (
           <View style={styles.loading}>
@@ -73,14 +105,23 @@ export default function Index() {
             showsHorizontalScrollIndicator={false}
             onMomentumScrollEnd={onScroll}
           >
-            {PAGES.map(page => (
-              <View key={page.key} style={{ width: SCREEN_WIDTH }}>
-                <BuoyMap
-                  buoyData={buoyData}
-                  mode={page.key as 'wave' | 'wind'}
-                />
-              </View>
-            ))}
+            {/* Page 1 — buoy map */}
+            <View style={{ width: SCREEN_WIDTH }}>
+              <BuoyMap
+                buoyData={buoyData}
+                season={season}
+                currentTideHeight={currentTideHeight}
+              />
+            </View>
+
+            {/* Page 2 — analog activities */}
+            <View style={{ width: SCREEN_WIDTH }}>
+              <AnalogActivities
+                buoyData={buoyData}
+                tideData={tideData}
+                season={season}
+              />
+            </View>
           </ScrollView>
         )}
         <Text style={styles.swipeHint}>
