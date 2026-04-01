@@ -1,0 +1,20 @@
+export const COLORS = {
+  background:       '#000000',
+  primary:          '#FF6B5B',
+  dim:              '#7A3B3B',
+  divider:          '#3A1515',
+  pageDotActive:    '#FF6B5B',
+  pageDotInactive:  '#3A1515',
+
+  gridOn:           '#FF6B5B',
+  gridOff:          '#1A0A0A',
+  gridBorder:       '#3A1515',
+  starCardBg:       '#0D0000',
+  starCardSelected: '#2A0A08',
+  transmitGlow:     '#FF6B5B',
+  transmitBeam:     '#FF3322',
+  logArrived:       '#3A1515',
+  logPending:       '#FF6B5B',
+  inputBorder:      '#3A1515',
+  inputFocus:       '#FF6B5B',
+};
