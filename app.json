@@ -16,7 +16,10 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.budat.app",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "Take a photo of the ocean to attach to your swell log.",
+        "NSPhotoLibraryUsageDescription": "Select a photo from your library to attach to your swell log.",
+        "NSMicrophoneUsageDescription": "Record an audio note for your swell log entry."
       },
       "buildNumber": "7"
     },
@@ -25,7 +28,16 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0A1628"
       },
-      "package": "com.budat.app"
+      "package": "com.budat.app",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.VIBRATE",
+        "android.permission.POST_NOTIFICATIONS"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -37,6 +49,15 @@
     },
     "owner": "jonspenser",
     "sdkVersion": "54.0.0",
-    "plugins": ["expo-router"]
+    "plugins": [
+      "expo-router",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#0A1628"
+        }
+      ]
+    ]
   }
 }

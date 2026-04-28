@@ -15,10 +15,13 @@ function formatDate(d: Date): string {
 
 const REFRESH_MS = 5 * 60 * 1000;
 
-export function useTideData(stationId: string) {
+export function useTideData(stationId: string, dayOffset = 0) {
   const [predictions, setPredictions] = useState<TidePrediction[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [fetchTick, setFetchTick] = useState(0);
+
+  const refetch = () => setFetchTick(t => t + 1);
 
   useEffect(() => {
     let cancelled = false;
@@ -30,6 +33,7 @@ export function useTideData(stationId: string) {
       setError(null);
       try {
         const today = new Date();
+        today.setDate(today.getDate() + dayOffset);
         const tomorrow = new Date(today);
         tomorrow.setDate(today.getDate() + 1);
 
@@ -66,7 +70,7 @@ export function useTideData(stationId: string) {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [stationId]);
+  }, [stationId, dayOffset, fetchTick]);
 
-  return { predictions, loading, error };
+  return { predictions, loading, error, refetch };
 }

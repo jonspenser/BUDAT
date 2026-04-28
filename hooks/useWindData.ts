@@ -2,53 +2,46 @@ import { useState, useEffect, useCallback } from 'react';
 
 export interface WindReading {
   stationId: string;
-  timestamp: string;       // UTC ISO string
-  windDirection: number | null;  // degrees true
-  windSpeed: number | null;      // m/s
-  windGust: number | null;       // m/s
-}
-
-function parseMissing(val: number): number | null {
-  if (val === 99 || val === 999 || val === 9999 || isNaN(val)) return null;
-  return val;
-}
-
-function parseWindTxt(text: string, stationId: string): WindReading | null {
-  const lines = text.split('\n');
-  const dataLines = lines.filter(l => !l.startsWith('#'));
-  if (dataLines.length < 3) return null;
-
-  const headers = dataLines[0].trim().split(/\s+/);
-  const values = dataLines[2].trim().split(/\s+/);
-
-  const get = (key: string): number | null => {
-    const i = headers.indexOf(key);
-    if (i === -1 || i >= values.length) return null;
-    return parseMissing(parseFloat(values[i]));
-  };
-
-  const yr = values[0] ?? '0000';
-  const mo = (values[1] ?? '01').padStart(2, '0');
-  const dy = (values[2] ?? '01').padStart(2, '0');
-  const hr = (values[3] ?? '00').padStart(2, '0');
-  const mn = (values[4] ?? '00').padStart(2, '0');
-
-  return {
-    stationId,
-    timestamp: `${yr}-${mo}-${dy}T${hr}:${mn}:00`,
-    windDirection: get('WDIR'),
-    windSpeed: get('WSPD'),
-    windGust: get('GST'),
-  };
+  dir: number | null;    // degrees true
+  speed: number | null;  // knots
+  gust: number | null;   // knots
 }
 
 const NDBC_BASE = 'https://www.ndbc.noaa.gov/data/realtime2/';
 const REFRESH_MS = 5 * 60 * 1000;
 
+function parseWindTxt(text: string, stationId: string): WindReading | null {
+  const lines = text.trim().split('\n');
+  const headers = lines[0].replace('#', '').trim().split(/\s+/);
+  // first data line is line index 2
+  const dataLine = lines[2]?.trim().split(/\s+/);
+  if (!dataLine) return null;
+
+  const get = (key: string): number | null => {
+    const i = headers.indexOf(key);
+    if (i === -1 || i >= dataLine.length) return null;
+    const v = parseFloat(dataLine[i]);
+    if (isNaN(v) || v === 99 || v === 999 || v === 9999) return null;
+    return v;
+  };
+
+  const wspd = get('WSPD');
+  const gst  = get('GST');
+  return {
+    stationId,
+    dir:   get('WDIR'),
+    speed: wspd !== null ? wspd * 1.944 : null,  // m/s → knots
+    gust:  gst  !== null ? gst  * 1.944 : null,
+  };
+}
+
 export function useWindData(stationId: string) {
   const [data, setData] = useState<WindReading | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [fetchTick, setFetchTick] = useState(0);
+
+  const refetch = () => setFetchTick(t => t + 1);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -72,31 +65,26 @@ export function useWindData(stationId: string) {
     let timer: ReturnType<typeof setTimeout>;
 
     async function run() {
-      if (!cancelled) {
-        setLoading(true);
-        setError(null);
-        try {
-          const res = await fetch(`${NDBC_BASE}${stationId}.txt`, { cache: 'no-store' });
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const text = await res.text();
-          const parsed = parseWindTxt(text, stationId);
-          if (!parsed) throw new Error('Parse error');
-          if (!cancelled) setData(parsed);
-        } catch (e: any) {
-          if (!cancelled) setError(e.message ?? 'Fetch error');
-        } finally {
-          if (!cancelled) setLoading(false);
-        }
-        if (!cancelled) timer = setTimeout(run, REFRESH_MS);
+      if (cancelled) return;
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(`${NDBC_BASE}${stationId}.txt`, { cache: 'no-store' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const text = await res.text();
+        const parsed = parseWindTxt(text, stationId);
+        if (parsed && !cancelled) setData(parsed);
+      } catch (e: any) {
+        if (!cancelled) setError(e.message ?? 'Fetch error');
+      } finally {
+        if (!cancelled) setLoading(false);
       }
+      if (!cancelled) timer = setTimeout(run, REFRESH_MS);
     }
 
     run();
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [stationId]);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [stationId, fetchTick]);
 
-  return { data, loading, error, refetch: fetchData };
+  return { data, loading, error, refetch };
 }

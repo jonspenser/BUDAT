@@ -1,3 +1,53 @@
+// ── Direction utils (recovered from Hermes bytecode, line 67239) ──────────────
+
+const COMPASS_POINTS = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'] as const;
+
+export function getCardinalDirection(degrees: number | null): string | null {
+  if (degrees === null || degrees === undefined || isNaN(degrees)) return null;
+  const normalized = ((degrees % 360) + 360) % 360;
+  const index = Math.round(normalized / 22.5) % 16;
+  return COMPASS_POINTS[index];
+}
+
+// ── Trend utils (recovered from Hermes bytecode, line 67387) ──────────────────
+// Compares the 5 most recent readings of `field` (default SwH = swell height).
+// Converts m → ft (× 3.28084), threshold ±1 ft.
+export type Trend = 'rising' | 'falling' | 'stable';
+
+export function calculateTrend(data: Array<Record<string, number | null>>, field = 'SwH'): Trend {
+  if (!data || data.length < 2) return 'stable';
+  const recent = data
+    .slice(0, 5)
+    .map(d => d[field] as number | null)
+    .filter((v): v is number => v !== null && !isNaN(v));
+  if (recent.length < 2) return 'stable';
+  const newest = recent[0] * 3.28084;
+  const oldest = recent[recent.length - 1] * 3.28084;
+  const diff = newest - oldest;
+  if (diff > 1) return 'rising';
+  if (diff < -1) return 'falling';
+  return 'stable';
+}
+
+export function getTrendIcon(trend: Trend): string {
+  if (trend === 'rising')  return '↑';
+  if (trend === 'falling') return '↓';
+  return '→';
+}
+
+// ── Offline detection ─────────────────────────────────────────────────────────
+
+const STALE_MS = 6 * 60 * 60 * 1000; // 6 hours
+
+export function isOffline(timestamp: Date | string | null | undefined): boolean {
+  if (!timestamp) return true;
+  const ms = timestamp instanceof Date ? timestamp.getTime() : Date.parse(timestamp);
+  if (isNaN(ms)) return true;
+  return Date.now() - ms > STALE_MS;
+}
+
+// ── Convert meters to feet and format as "X.Xft" ──────────────────────────────
+
 /** Convert meters to feet and format as "X.Xft" */
 export function formatHeight(meters: number | null): string {
   if (meters === null) return '--';
@@ -22,12 +72,14 @@ export function formatDirection(deg: number | null): string {
 }
 
 /**
- * Convert a UTC timestamp string "YYYY-MM-DDTHH:MM:00" (from NOAA, already UTC)
- * to Hawaii time (UTC-10) and format as "H:MM AM/PM"
+ * Convert a UTC timestamp (string "YYYY-MM-DDTHH:MM:00" or Date) to Hawaii time (UTC-10)
+ * and format as "H:MM AM/PM"
  */
-export function formatHawaiiTime(utcIso: string): string {
+export function formatHawaiiTime(utcIsoOrDate: string | Date): string {
   // Parse the UTC time
-  const utcMs = Date.parse(utcIso + 'Z');
+  const utcMs = utcIsoOrDate instanceof Date
+    ? utcIsoOrDate.getTime()
+    : Date.parse(utcIsoOrDate + 'Z');
   if (isNaN(utcMs)) return '--';
   // Hawaii is UTC-10 (no DST)
   const hiMs = utcMs - 10 * 60 * 60 * 1000;
