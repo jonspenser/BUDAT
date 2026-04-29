@@ -8,7 +8,7 @@ import {
   ActivityIndicator,
   Dimensions,
 } from 'react-native';
-import Svg, { Polygon } from 'react-native-svg';
+import Svg, { Path, Polygon, Circle, Line, Text as SvgText } from 'react-native-svg';
 import { useWaveForecast, WaveForecastPoint } from '../hooks/useWaveForecast';
 import { getCardinalDirection } from '../constants/formatters';
 import { categorize, SwellCategory } from '../hooks/useSwellLog';
@@ -45,6 +45,17 @@ function fmtHiTime(utc: Date): string {
   const isPm = h24 >= 12;
   const h12  = h24 % 12 || 12;
   return `${h12}:${String(mn).padStart(2,'0')}${isPm ? 'p' : 'a'}`;
+}
+
+/** Short day label from a YYYY-MM-DD dateKey */
+function dayLabel(dateKey: string): string {
+  const todayKey    = hiDateKey(new Date());
+  const tomorrowKey = hiDateKey(new Date(Date.now() + 24 * 3600_000));
+  if (dateKey === todayKey) return 'TODAY';
+  if (dateKey === tomorrowKey) return 'TMW';
+  const d = new Date(dateKey + 'T12:00:00Z');
+  const days = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+  return days[d.getUTCDay()];
 }
 
 /** Format "YYYY-MM-DD" → "MON APR 28" or "TODAY" / "TOMORROW" */
@@ -101,6 +112,193 @@ const badge = StyleSheet.create({
   text:  { fontFamily: 'Courier', fontWeight: '700', fontSize: 11, letterSpacing: 1 },
 });
 
+// ── Wave forecast chart ───────────────────────────────────────────────────────
+
+const CHART_PAD_LEFT  = 34;
+const CHART_PAD_RIGHT = 10;
+const CHART_PAD_TOP   = 22;
+const CHART_PAD_BOT   = 20;
+
+interface ChartProps {
+  forecast: WaveForecastPoint[];
+  width: number;
+  height: number;
+  theme: any;
+}
+
+function WaveForecastChart({ forecast, width, height, theme }: ChartProps) {
+  const chartW = Math.max(width - CHART_PAD_LEFT - CHART_PAD_RIGHT, 1);
+  const chartH = height - CHART_PAD_TOP - CHART_PAD_BOT;
+
+  const { path, yLabels, dayBounds, nowX, nowY, peakPerDay } = useMemo(() => {
+    const empty = { path: '', yLabels: [] as {y:number;label:string}[], dayBounds: [] as {x:number;label:string;isToday:boolean}[], nowX: null as number|null, nowY: null as number|null, peakPerDay: [] as {x:number;y:number;label:string}[] };
+    if (forecast.length < 2) return empty;
+
+    const t0 = forecast[0].time.getTime();
+    const t1 = forecast[forecast.length - 1].time.getTime();
+    const tRange = t1 - t0;
+
+    const heights = forecast.map(p => htFt(p.heightM));
+    const maxHt = Math.max(...heights);
+    // Round up to nearest foot, add 0.5ft buffer
+    const yMax = Math.ceil(maxHt) + 0.5;
+    const yMin = 0;
+
+    const xScale = (t: number) => ((t - t0) / tRange) * chartW;
+    const yScale = (ft: number) => chartH - ((ft - yMin) / (yMax - yMin)) * chartH;
+
+    // Build path
+    let pathStr = '';
+    forecast.forEach((pt, i) => {
+      const x = xScale(pt.time.getTime());
+      const y = yScale(htFt(pt.heightM));
+      pathStr += i === 0 ? `M ${x.toFixed(1)},${y.toFixed(1)}` : ` L ${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+
+    // Day boundaries (when Hawaii date key changes)
+    const todayKey = hiDateKey(new Date());
+    const bounds: {x:number;label:string;isToday:boolean}[] = [];
+    let prevKey = hiDateKey(forecast[0].time);
+    // Add label for the first day at x=0
+    bounds.push({ x: 0, label: dayLabel(prevKey), isToday: prevKey === todayKey });
+    for (let i = 1; i < forecast.length; i++) {
+      const k = hiDateKey(forecast[i].time);
+      if (k !== prevKey) {
+        bounds.push({ x: xScale(forecast[i].time.getTime()), label: dayLabel(k), isToday: k === todayKey });
+        prevKey = k;
+      }
+    }
+
+    // Y-axis labels
+    const yStep = yMax > 8 ? 2 : yMax > 4 ? 1 : 0.5;
+    const yLabelArr: {y:number;label:string}[] = [];
+    for (let ft = 0; ft <= yMax; ft += yStep) {
+      if (ft > yMax) break;
+      yLabelArr.push({ y: yScale(ft), label: `${ft.toFixed(0)}` });
+    }
+
+    // Peak per day annotations
+    const dayMap = new Map<string, {x:number;y:number;label:string}>();
+    forecast.forEach(pt => {
+      const k = hiDateKey(pt.time);
+      const ft = htFt(pt.heightM);
+      const x = xScale(pt.time.getTime());
+      const y = yScale(ft);
+      const existing = dayMap.get(k);
+      if (!existing || ft > parseFloat(existing.label)) {
+        dayMap.set(k, { x, y, label: ft.toFixed(1) });
+      }
+    });
+    const peakArr = Array.from(dayMap.values());
+
+    // Current time
+    const now = Date.now();
+    let nowXVal: number | null = null;
+    let nowYVal: number | null = null;
+    if (now >= t0 && now <= t1) {
+      nowXVal = xScale(now);
+      for (let i = 0; i < forecast.length - 1; i++) {
+        if (now >= forecast[i].time.getTime() && now <= forecast[i+1].time.getTime()) {
+          const t = (now - forecast[i].time.getTime()) / (forecast[i+1].time.getTime() - forecast[i].time.getTime());
+          const ft = htFt(forecast[i].heightM) + (htFt(forecast[i+1].heightM) - htFt(forecast[i].heightM)) * t;
+          nowYVal = yScale(ft);
+          break;
+        }
+      }
+    }
+
+    return { path: pathStr, yLabels: yLabelArr, dayBounds: bounds, nowX: nowXVal, nowY: nowYVal, peakPerDay: peakArr };
+  }, [forecast, chartW, chartH]);
+
+  const svgH = height;
+
+  return (
+    <Svg width={width} height={svgH}>
+      {/* Y-axis labels */}
+      {yLabels.map((lbl, i) => (
+        <SvgText
+          key={i}
+          x={CHART_PAD_LEFT - 4}
+          y={CHART_PAD_TOP + lbl.y + 4}
+          fontSize={9}
+          fontFamily="Courier"
+          fill={theme.muted}
+          textAnchor="end"
+        >
+          {lbl.label}
+        </SvgText>
+      ))}
+
+      {/* Day boundary vertical lines + labels */}
+      {dayBounds.map((b, i) => {
+        const cx = CHART_PAD_LEFT + b.x;
+        return (
+          <React.Fragment key={i}>
+            {i > 0 && (
+              <Line
+                x1={cx} y1={CHART_PAD_TOP}
+                x2={cx} y2={CHART_PAD_TOP + chartH}
+                stroke={theme.accentDim}
+                strokeWidth={0.5}
+                strokeDasharray="3,4"
+                opacity={0.5}
+              />
+            )}
+            <SvgText
+              x={cx + (i === 0 ? 0 : 3)}
+              y={svgH - 4}
+              fontSize={9}
+              fontFamily="Courier"
+              fontWeight="700"
+              fill={b.isToday ? theme.accent : theme.muted}
+              textAnchor={i === 0 ? 'start' : 'start'}
+            >
+              {b.label}
+            </SvgText>
+          </React.Fragment>
+        );
+      })}
+
+      {/* Wave curve */}
+      {path ? (
+        <Path
+          d={path}
+          stroke={theme.accent}
+          strokeWidth={1.5}
+          fill="none"
+          transform={`translate(${CHART_PAD_LEFT}, ${CHART_PAD_TOP})`}
+        />
+      ) : null}
+
+      {/* Peak height labels per day */}
+      {peakPerDay.map((p, i) => (
+        <SvgText
+          key={i}
+          x={CHART_PAD_LEFT + p.x}
+          y={CHART_PAD_TOP + p.y - 6}
+          fontSize={9}
+          fontFamily="Courier"
+          fontWeight="700"
+          fill={theme.textPrimary}
+          textAnchor="middle"
+        >
+          {p.label}
+        </SvgText>
+      ))}
+
+      {/* Current time dot */}
+      {nowX !== null && nowY !== null && (
+        <Circle
+          cx={CHART_PAD_LEFT + nowX}
+          cy={CHART_PAD_TOP + nowY}
+          r={4}
+          fill={theme.accent}
+        />
+      )}
+    </Svg>
+  );
+}
+
 // ── Daily summary ─────────────────────────────────────────────────────────────
 
 interface DayData {
@@ -147,6 +345,8 @@ export function ForecastPage({ height, theme, stationId }: ForecastPageProps) {
 
   const days = useMemo(() => groupByDay(forecast), [forecast]);
 
+  const chartHeight = 160;
+
   return (
     <View style={height ? { height, width: SCREEN_W } : { flex: 1 }}>
       {/* Header */}
@@ -169,6 +369,19 @@ export function ForecastPage({ height, theme, stationId }: ForecastPageProps) {
         </View>
       ) : (
         <ScrollView contentContainerStyle={styles.scroll}>
+          {/* Wave height chart */}
+          {forecast.length > 0 && (
+            <View style={[styles.chartWrap, { borderColor: theme.accentDim }]}>
+              <WaveForecastChart
+                forecast={forecast}
+                width={SCREEN_W - 28}
+                height={chartHeight}
+                theme={theme}
+              />
+            </View>
+          )}
+
+          {/* Daily summary rows */}
           {days.map(day => {
             const expanded = expandedDay === day.dateKey;
             const cat = categorize(htFt(day.peakHtM));
@@ -184,7 +397,7 @@ export function ForecastPage({ height, theme, stationId }: ForecastPageProps) {
                   <View style={styles.dayRow}>
                     {/* Date */}
                     <View style={styles.dayLeft}>
-                      <Text style={[styles.dayLabel, { color: theme.accent }]}>{label}</Text>
+                      <Text style={[styles.dayLabel, { color: day.dateKey === todayKey ? theme.accent : theme.textPrimary }]}>{label}</Text>
                       <Text style={[styles.dayDir, { color: theme.muted }]}>{dir}  {day.peakPt.period.toFixed(0)}s</Text>
                     </View>
                     {/* Peak */}
@@ -253,6 +466,14 @@ const styles = StyleSheet.create({
   center:        { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
   loadingText:   { fontFamily: 'Courier', fontSize: 11, letterSpacing: 2 },
   errorText:     { fontFamily: 'Courier', fontSize: 11, letterSpacing: 1 },
+
+  chartWrap: {
+    borderWidth: 1,
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginBottom: 14,
+    opacity: 0.95,
+  },
 
   dayRow:  { flexDirection: 'row', alignItems: 'center', paddingVertical: 12 },
   dayLeft: { flex: 1 },
