@@ -71,7 +71,7 @@ const MIN_WAVE_MAX_FT = 7;
 // ── Shared: build day-boundary list from any forecast array ──────────────────
 
 interface DayBound { x: number; label: string; isToday: boolean }
-interface WindArrow { x: number; directionDeg: number; speedKt: number }
+interface WindArrow { x: number; y: number; directionDeg: number; speedKt: number }
 
 function buildDayBounds(
   times: Date[],
@@ -176,6 +176,19 @@ function CombinedForecastChart({
 
     const bounds = buildDayBounds(waveForecast.map(p => p.time), t0, tRange, chartW);
 
+    // Interpolate wave height (ft) at a given timestamp
+    function waveHeightAtMs(targetMs: number): number {
+      for (let i = 0; i < waveForecast.length - 1; i++) {
+        const ta = waveForecast[i].time.getTime();
+        const tb = waveForecast[i + 1].time.getTime();
+        if (targetMs >= ta && targetMs <= tb) {
+          const t = (targetMs - ta) / (tb - ta);
+          return toFt(waveForecast[i].heightM) + (toFt(waveForecast[i + 1].heightM) - toFt(waveForecast[i].heightM)) * t;
+        }
+      }
+      return toFt(waveForecast[0].heightM);
+    }
+
     const arrowDays = Array.from(new Set(waveForecast.map(p => hiDateKey(p.time))));
     const arrows: WindArrow[] = [];
     if (windReady) {
@@ -185,7 +198,13 @@ function CombinedForecastChart({
           if (targetMs < t0 || targetMs > t1) return;
           const sample = nearestWindSample(windForecast, targetMs);
           if (sample == null) return;
-          arrows.push({ x: xS(targetMs), directionDeg: sample.directionDeg, speedKt: sample.speedKt });
+          const waveFt = waveHeightAtMs(targetMs);
+          arrows.push({
+            x: xS(targetMs),
+            y: waveYS(waveFt),
+            directionDeg: sample.directionDeg,
+            speedKt: sample.speedKt,
+          });
         });
       });
     }
@@ -253,11 +272,13 @@ function CombinedForecastChart({
       ) : null}
       {windArrows.map((a, i) => {
         const travelDeg = (a.directionDeg + 180) % 360;
-        const arrowY = PAD_T + chartH - 16;
+        const sz = windArrowSize(a.speedKt);
+        // Center arrow so its bottom tip sits just above the wave line
+        const arrowY = PAD_T + a.y - sz * 0.44 - 4;
         return (
           <Polygon
             key={i}
-            points={arrowPoints(PAD_L + a.x, arrowY, windArrowSize(a.speedKt), travelDeg)}
+            points={arrowPoints(PAD_L + a.x, arrowY, sz, travelDeg)}
             fill={theme.accent}
             opacity={0.72}
           />
