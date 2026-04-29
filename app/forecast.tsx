@@ -7,7 +7,7 @@ import {
   Dimensions,
   ScrollView,
 } from 'react-native';
-import Svg, { Path, Circle, Line, Text as SvgText } from 'react-native-svg';
+import Svg, { Path, Circle, Line, Polygon, Text as SvgText } from 'react-native-svg';
 import { useWaveForecast, WaveForecastPoint } from '../hooks/useWaveForecast';
 import { useWindForecast, WindForecastPoint } from '../hooks/useWindForecast';
 
@@ -31,23 +31,47 @@ function hiDateKey(utc: Date): string {
 
 function dayShortLabel(dateKey: string): string {
   const todayKey = hiDateKey(new Date());
-  const tomorrowKey = hiDateKey(new Date(Date.now() + 24 * 3600_000));
   if (dateKey === todayKey) return 'TODAY';
-  if (dateKey === tomorrowKey) return 'TMW';
   const d = new Date(dateKey + 'T12:00:00Z');
   return ['SUN','MON','TUE','WED','THU','FRI','SAT'][d.getUTCDay()];
+}
+
+function hstDateKeyToUtcMs(dateKey: string, hstHour: number): number {
+  return new Date(`${dateKey}T${String(hstHour).padStart(2, '0')}:00:00-10:00`).getTime();
+}
+
+function arrowPoints(cx: number, cy: number, size: number, travelDeg: number): string {
+  const r = size * 0.44;
+  const headW = size * 0.26;
+  const headH = size * 0.36;
+  const shaftW = size * 0.08;
+  const pts: [number, number][] = [
+    [0, -r],
+    [headW, -r + headH],
+    [shaftW, -r + headH],
+    [shaftW, r],
+    [-shaftW, r],
+    [-shaftW, -r + headH],
+    [-headW, -r + headH],
+  ];
+  const rad = (travelDeg * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  return pts.map(([px, py]) => `${cx + px * cos - py * sin},${cy + px * sin + py * cos}`).join(' ');
 }
 
 // ── Chart layout constants ────────────────────────────────────────────────────
 
 const PAD_L = 34;
-const PAD_R = 10;
+const PAD_R = 34;
 const PAD_T = 24;
 const PAD_B = 20;
+const MIN_WAVE_MAX_FT = 7;
 
 // ── Shared: build day-boundary list from any forecast array ──────────────────
 
 interface DayBound { x: number; label: string; isToday: boolean }
+interface WindArrow { x: number; directionDeg: number; speedKt: number }
 
 function buildDayBounds(
   times: Date[],
@@ -73,94 +97,142 @@ function buildDayBounds(
   return bounds;
 }
 
-// ── Wave chart ────────────────────────────────────────────────────────────────
+function nearestWindSample(forecast: WindForecastPoint[], targetMs: number): WindForecastPoint | null {
+  if (forecast.length === 0) return null;
+  let best = forecast[0];
+  let bestDelta = Math.abs(best.time.getTime() - targetMs);
+  for (let i = 1; i < forecast.length; i++) {
+    const delta = Math.abs(forecast[i].time.getTime() - targetMs);
+    if (delta < bestDelta) {
+      best = forecast[i];
+      bestDelta = delta;
+    }
+  }
+  return bestDelta <= 6 * 3600_000 ? best : null;
+}
 
-function WaveChart({
-  forecast, width, height, theme,
-}: { forecast: WaveForecastPoint[]; width: number; height: number; theme: any }) {
+function windArrowSize(speedKt: number): number {
+  const clamped = Math.max(0, Math.min(speedKt, 30));
+  return (9 + (clamped / 30) * 13) * 1.25;
+}
+
+function waveChartMaxFt(heightsFt: number[]): number {
+  return Math.max(MIN_WAVE_MAX_FT, Math.ceil(Math.max(...heightsFt)));
+}
+
+// ── Combined forecast chart ──────────────────────────────────────────────────
+
+function CombinedForecastChart({
+  waveForecast, windForecast, width, height, theme,
+}: {
+  waveForecast: WaveForecastPoint[];
+  windForecast: WindForecastPoint[];
+  width: number;
+  height: number;
+  theme: any;
+}) {
   const chartW = Math.max(width - PAD_L - PAD_R, 1);
   const chartH = height - PAD_T - PAD_B;
 
-  const { path, yLabels, dayBounds, nowX, nowY, peakPerDay } = useMemo(() => {
+  const {
+    wavePath, waveLabels, dayBounds, waveNowX, waveNowY, peakPerDay, windArrows,
+  } = useMemo(() => {
     type PeakEntry = { x: number; y: number; ft: number };
     const empty = {
-      path: '', yLabels: [] as { y: number; label: string }[],
-      dayBounds: [] as DayBound[], nowX: null as number | null,
-      nowY: null as number | null, peakPerDay: [] as PeakEntry[],
+      wavePath: '',
+      waveLabels: [] as { y: number; label: string }[],
+      dayBounds: [] as DayBound[],
+      waveNowX: null as number | null,
+      waveNowY: null as number | null,
+      peakPerDay: [] as PeakEntry[],
+      windArrows: [] as WindArrow[],
     };
-    if (forecast.length < 2) return empty;
+    if (waveForecast.length < 2) return empty;
 
-    const t0 = forecast[0].time.getTime();
-    const t1 = forecast[forecast.length - 1].time.getTime();
+    const windReady = windForecast.length >= 2;
+    const t0 = waveForecast[0].time.getTime();
+    const t1 = waveForecast[waveForecast.length - 1].time.getTime();
     const tRange = t1 - t0;
 
     const toFt = (m: number) => m * 3.28084;
-    const heights = forecast.map(p => toFt(p.heightM));
-    const yMax = Math.ceil(Math.max(...heights)) + 0.5;
+    const heightsFt = waveForecast.map(p => toFt(p.heightM));
+    const waveMax = waveChartMaxFt(heightsFt);
 
     const xS = (t: number) => ((t - t0) / tRange) * chartW;
-    const yS = (ft: number) => chartH - (ft / yMax) * chartH;
+    const waveYS = (ft: number) => chartH - (ft / waveMax) * chartH;
 
-    // Path
-    let pathStr = '';
-    forecast.forEach((pt, i) => {
+    let wavePathStr = '';
+    waveForecast.forEach((pt, i) => {
       const x = xS(pt.time.getTime()).toFixed(1);
-      const y = yS(toFt(pt.heightM)).toFixed(1);
-      pathStr += i === 0 ? `M ${x},${y}` : ` L ${x},${y}`;
+      const y = waveYS(toFt(pt.heightM)).toFixed(1);
+      wavePathStr += i === 0 ? `M ${x},${y}` : ` L ${x},${y}`;
     });
 
-    // Y labels
-    const yStep = yMax > 8 ? 2 : 1;
-    const yLbls: { y: number; label: string }[] = [];
-    for (let ft = 0; ft <= yMax; ft += yStep) {
-      yLbls.push({ y: yS(ft), label: `${ft}` });
+    const waveLbls: { y: number; label: string }[] = [];
+    const waveStep = waveMax > 10 ? 2 : 1;
+    for (let ft = 0; ft <= waveMax; ft += waveStep) {
+      waveLbls.push({ y: waveYS(ft), label: `${ft}` });
     }
 
-    // Day bounds
-    const bounds = buildDayBounds(forecast.map(p => p.time), t0, tRange, chartW);
+    const bounds = buildDayBounds(waveForecast.map(p => p.time), t0, tRange, chartW);
 
-    // Peak per day
+    const arrowDays = Array.from(new Set(waveForecast.map(p => hiDateKey(p.time))));
+    const arrows: WindArrow[] = [];
+    if (windReady) {
+      arrowDays.forEach(dateKey => {
+        [6, 18].forEach(hour => {
+          const targetMs = hstDateKeyToUtcMs(dateKey, hour);
+          if (targetMs < t0 || targetMs > t1) return;
+          const sample = nearestWindSample(windForecast, targetMs);
+          if (sample == null) return;
+          arrows.push({ x: xS(targetMs), directionDeg: sample.directionDeg, speedKt: sample.speedKt });
+        });
+      });
+    }
+
     const dayMap = new Map<string, PeakEntry>();
-    forecast.forEach(pt => {
+    waveForecast.forEach(pt => {
       const k = hiDateKey(pt.time);
       const ft = toFt(pt.heightM);
       const ex = dayMap.get(k);
       if (!ex || ft > ex.ft) {
-        dayMap.set(k, { x: xS(pt.time.getTime()), y: yS(ft), ft });
+        dayMap.set(k, { x: xS(pt.time.getTime()), y: waveYS(ft), ft });
       }
     });
 
-    // Now dot
     const now = Date.now();
-    let nowX: number | null = null;
-    let nowY: number | null = null;
+    let waveNowX: number | null = null;
+    let waveNowY: number | null = null;
     if (now >= t0 && now <= t1) {
-      nowX = xS(now);
-      for (let i = 0; i < forecast.length - 1; i++) {
-        const ta = forecast[i].time.getTime(), tb = forecast[i + 1].time.getTime();
+      waveNowX = xS(now);
+
+      for (let i = 0; i < waveForecast.length - 1; i++) {
+        const ta = waveForecast[i].time.getTime(), tb = waveForecast[i + 1].time.getTime();
         if (now >= ta && now <= tb) {
           const t = (now - ta) / (tb - ta);
-          const ft = toFt(forecast[i].heightM) + (toFt(forecast[i + 1].heightM) - toFt(forecast[i].heightM)) * t;
-          nowY = yS(ft);
+          const ft = toFt(waveForecast[i].heightM) + (toFt(waveForecast[i + 1].heightM) - toFt(waveForecast[i].heightM)) * t;
+          waveNowY = waveYS(ft);
           break;
         }
       }
     }
 
-    return { path: pathStr, yLabels: yLbls, dayBounds: bounds, nowX, nowY, peakPerDay: Array.from(dayMap.values()) };
-  }, [forecast, chartW, chartH]);
+    return {
+      wavePath: wavePathStr,
+      waveLabels: waveLbls,
+      dayBounds: bounds, waveNowX, waveNowY,
+      peakPerDay: Array.from(dayMap.values()), windArrows: arrows,
+    };
+  }, [waveForecast, windForecast, chartW, chartH]);
 
   return (
     <Svg width={width} height={height}>
-      {/* Y labels */}
-      {yLabels.map((l, i) => (
+      {waveLabels.map((l, i) => (
         <SvgText key={i} x={PAD_L - 4} y={PAD_T + l.y + 4}
           fontSize={9} fontFamily="Courier" fill={theme.muted} textAnchor="end">
           {l.label}
         </SvgText>
       ))}
-
-      {/* Day boundaries */}
       {dayBounds.map((b, i) => (
         <React.Fragment key={i}>
           {i > 0 && (
@@ -175,13 +247,23 @@ function WaveChart({
         </React.Fragment>
       ))}
 
-      {/* Curve */}
-      {path ? (
-        <Path d={path} stroke={theme.accent} strokeWidth={1.5} fill="none"
+      {wavePath ? (
+        <Path d={wavePath} stroke={theme.accent} strokeWidth={1.5} fill="none"
           transform={`translate(${PAD_L},${PAD_T})`} />
       ) : null}
+      {windArrows.map((a, i) => {
+        const travelDeg = (a.directionDeg + 180) % 360;
+        const arrowY = PAD_T + chartH - 16;
+        return (
+          <Polygon
+            key={i}
+            points={arrowPoints(PAD_L + a.x, arrowY, windArrowSize(a.speedKt), travelDeg)}
+            fill={theme.accent}
+            opacity={0.72}
+          />
+        );
+      })}
 
-      {/* Peak labels */}
       {peakPerDay.map((p, i) => (
         <SvgText key={i} x={PAD_L + p.x} y={PAD_T + p.y - 6}
           fontSize={9} fontFamily="Courier" fontWeight="700"
@@ -190,110 +272,8 @@ function WaveChart({
         </SvgText>
       ))}
 
-      {/* Now dot */}
-      {nowX !== null && nowY !== null && (
-        <Circle cx={PAD_L + nowX} cy={PAD_T + nowY} r={4} fill={theme.accent} />
-      )}
-    </Svg>
-  );
-}
-
-// ── Wind chart ────────────────────────────────────────────────────────────────
-
-function WindChart({
-  forecast, width, height, theme,
-}: { forecast: WindForecastPoint[]; width: number; height: number; theme: any }) {
-  const chartW = Math.max(width - PAD_L - PAD_R, 1);
-  const chartH = height - PAD_T - PAD_B;
-
-  const { path, yLabels, dayBounds, nowX, nowY } = useMemo(() => {
-    const empty = {
-      path: '', yLabels: [] as { y: number; label: string }[],
-      dayBounds: [] as DayBound[], nowX: null as number | null, nowY: null as number | null,
-    };
-    if (forecast.length < 2) return empty;
-
-    const t0 = forecast[0].time.getTime();
-    const t1 = forecast[forecast.length - 1].time.getTime();
-    const tRange = t1 - t0;
-
-    const speeds = forecast.map(p => p.speedKt);
-    const yMax = Math.ceil(Math.max(...speeds) / 5) * 5 + 5; // round up to next 5kt
-
-    const xS = (t: number) => ((t - t0) / tRange) * chartW;
-    const yS = (kt: number) => chartH - (kt / yMax) * chartH;
-
-    // Path
-    let pathStr = '';
-    forecast.forEach((pt, i) => {
-      const x = xS(pt.time.getTime()).toFixed(1);
-      const y = yS(pt.speedKt).toFixed(1);
-      pathStr += i === 0 ? `M ${x},${y}` : ` L ${x},${y}`;
-    });
-
-    // Y labels (every 5 kt)
-    const yLbls: { y: number; label: string }[] = [];
-    for (let kt = 0; kt <= yMax; kt += 5) {
-      yLbls.push({ y: yS(kt), label: `${kt}` });
-    }
-
-    // Day bounds
-    const bounds = buildDayBounds(forecast.map(p => p.time), t0, tRange, chartW);
-
-    // Now dot
-    const now = Date.now();
-    let nowX: number | null = null;
-    let nowY: number | null = null;
-    if (now >= t0 && now <= t1) {
-      nowX = xS(now);
-      for (let i = 0; i < forecast.length - 1; i++) {
-        const ta = forecast[i].time.getTime(), tb = forecast[i + 1].time.getTime();
-        if (now >= ta && now <= tb) {
-          const t = (now - ta) / (tb - ta);
-          const kt = forecast[i].speedKt + (forecast[i + 1].speedKt - forecast[i].speedKt) * t;
-          nowY = yS(kt);
-          break;
-        }
-      }
-    }
-
-    return { path: pathStr, yLabels: yLbls, dayBounds: bounds, nowX, nowY };
-  }, [forecast, chartW, chartH]);
-
-  return (
-    <Svg width={width} height={height}>
-      {/* Y labels */}
-      {yLabels.map((l, i) => (
-        <SvgText key={i} x={PAD_L - 4} y={PAD_T + l.y + 4}
-          fontSize={9} fontFamily="Courier" fill={theme.muted} textAnchor="end">
-          {l.label}
-        </SvgText>
-      ))}
-
-      {/* Day boundaries */}
-      {dayBounds.map((b, i) => (
-        <React.Fragment key={i}>
-          {i > 0 && (
-            <Line x1={PAD_L + b.x} y1={PAD_T} x2={PAD_L + b.x} y2={PAD_T + chartH}
-              stroke={theme.accentDim} strokeWidth={0.5} strokeDasharray="3,4" opacity={0.5} />
-          )}
-          <SvgText x={PAD_L + b.x + (i === 0 ? 0 : 3)} y={height - 4}
-            fontSize={9} fontFamily="Courier" fontWeight="700"
-            fill={b.isToday ? theme.accent : theme.muted} textAnchor="start">
-            {b.label}
-          </SvgText>
-        </React.Fragment>
-      ))}
-
-      {/* Curve */}
-      {path ? (
-        <Path d={path} stroke={theme.accentDim} strokeWidth={1.5} fill="none"
-          transform={`translate(${PAD_L},${PAD_T})`} />
-      ) : null}
-
-      {/* Now dot */}
-      {nowX !== null && nowY !== null && (
-        <Circle cx={PAD_L + nowX} cy={PAD_T + nowY} r={4} fill={theme.accentDim} />
+      {waveNowX !== null && waveNowY !== null && (
+        <Circle cx={PAD_L + waveNowX} cy={PAD_T + waveNowY} r={4} fill={theme.accent} />
       )}
     </Svg>
   );
@@ -329,12 +309,11 @@ export function ForecastPage({ height, theme, stationId }: ForecastPageProps) {
   const { forecast: waveFc, loading: waveLoading, error: waveErr } = useWaveForecast(coords.lat, coords.lon);
   const { forecast: windFc, loading: windLoading, error: windErr } = useWindForecast(coords.lat, coords.lon);
 
-  const loading = (waveLoading && waveFc.length === 0) || (windLoading && windFc.length === 0);
-  const error = waveErr ?? windErr ?? null;
+  const loading = waveLoading && waveFc.length === 0;
+  const error = waveErr ?? null;
 
   const chartW = SCREEN_W - 28;
-  const waveH  = 160;
-  const windH  = 130;
+  const combinedH = 240;
 
   return (
     <View style={height ? { height, width: SCREEN_W } : { flex: 1 }}>
@@ -358,17 +337,33 @@ export function ForecastPage({ height, theme, stationId }: ForecastPageProps) {
         </View>
       ) : (
         <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-          {/* Wave height */}
-          <SectionLabel text="WAVE HEIGHT" unit="ft" theme={theme} />
-          <View style={[styles.chartBox, { borderColor: theme.accentDim }]}>
-            <WaveChart forecast={waveFc} width={chartW} height={waveH} theme={theme} />
+          <View style={styles.legendRow}>
+            <View style={styles.legendItem}>
+              <View style={[styles.legendLine, { backgroundColor: theme.accent }]} />
+              <Text style={[styles.legendText, { color: theme.muted }]}>WAVE FT</Text>
+            </View>
+            <View style={styles.legendItem}>
+              <Svg width={18} height={12}>
+                <Polygon points={arrowPoints(9, 6, 12, 90)} fill={theme.accent} opacity={0.78} />
+              </Svg>
+              <Text style={[styles.legendText, { color: theme.muted }]}>WIND</Text>
+            </View>
           </View>
-
-          {/* Wind speed */}
-          <SectionLabel text="WIND SPEED" unit="kt" theme={theme} />
+          <SectionLabel text="FORECAST" unit="ft / wind" theme={theme} />
           <View style={[styles.chartBox, { borderColor: theme.accentDim }]}>
-            <WindChart forecast={windFc} width={chartW} height={windH} theme={theme} />
+            <CombinedForecastChart
+              waveForecast={waveFc}
+              windForecast={windErr ? [] : windFc}
+              width={chartW}
+              height={combinedH}
+              theme={theme}
+            />
           </View>
+          {(windLoading && windFc.length === 0) || windErr || windFc.length === 0 ? (
+            <Text style={[styles.modelFallbackText, { color: theme.muted }]}>
+              {windLoading && windFc.length === 0 ? 'LOADING WRF WIND…' : 'WRF WIND UNAVAILABLE'}
+            </Text>
+          ) : null}
         </ScrollView>
       )}
     </View>
@@ -386,4 +381,10 @@ const styles = StyleSheet.create({
   loadingText: { fontFamily: 'Courier', fontSize: 11, letterSpacing: 2 },
   errorText:   { fontFamily: 'Courier', fontSize: 11, letterSpacing: 1 },
   chartBox:    { borderWidth: 1, borderRadius: 4, overflow: 'hidden' },
+  legendRow:   { flexDirection: 'row', justifyContent: 'flex-end', gap: 14, marginTop: 14 },
+  legendItem:  { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  legendLine:  { width: 18, height: 2 },
+  legendText:  { fontFamily: 'Courier', fontWeight: '700', fontSize: 9, letterSpacing: 1 },
+  modelFallback: { alignItems: 'center', justifyContent: 'center' },
+  modelFallbackText: { fontFamily: 'Courier', fontSize: 10, letterSpacing: 2, marginTop: 8, textAlign: 'center' },
 });
