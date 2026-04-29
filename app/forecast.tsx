@@ -1,21 +1,19 @@
-import React, { useState, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import {
   View,
   Text,
-  ScrollView,
-  TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
   Dimensions,
+  ScrollView,
 } from 'react-native';
-import Svg, { Path, Polygon, Circle, Line, Text as SvgText } from 'react-native-svg';
+import Svg, { Path, Circle, Line, Text as SvgText } from 'react-native-svg';
 import { useWaveForecast, WaveForecastPoint } from '../hooks/useWaveForecast';
-import { getCardinalDirection } from '../constants/formatters';
-import { categorize, SwellCategory } from '../hooks/useSwellLog';
+import { useWindForecast, WindForecastPoint } from '../hooks/useWindForecast';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
-// ── Forecast locations keyed by station id ────────────────────────────────────
+// ── Forecast locations ────────────────────────────────────────────────────────
 
 export const FORECAST_COORDS: Record<string, { lat: number; lon: number; label: string }> = {
   kahului:    { lat: 21.00, lon: -156.50, label: 'NORTH MAUI' },
@@ -25,307 +23,297 @@ export const FORECAST_COORDS: Record<string, { lat: number; lon: number; label: 
   kawaihae:   { lat: 20.00, lon: -155.85, label: 'WEST HAWAII' },
 };
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Time helpers ──────────────────────────────────────────────────────────────
 
-/** Convert UTC Date to Hawaii date string "YYYY-MM-DD" */
 function hiDateKey(utc: Date): string {
-  const hi = new Date(utc.getTime() - 10 * 3600_000);
-  return hi.toISOString().slice(0, 10);
+  return new Date(utc.getTime() - 10 * 3600_000).toISOString().slice(0, 10);
 }
 
-/** Hawaii hour 0-23 from UTC Date */
-function hiHour(utc: Date): number {
-  return new Date(utc.getTime() - 10 * 3600_000).getUTCHours();
-}
-
-/** Format UTC Date → "H:MMa/p" Hawaii time */
-function fmtHiTime(utc: Date): string {
-  const h24 = hiHour(utc);
-  const mn  = new Date(utc.getTime() - 10 * 3600_000).getUTCMinutes();
-  const isPm = h24 >= 12;
-  const h12  = h24 % 12 || 12;
-  return `${h12}:${String(mn).padStart(2,'0')}${isPm ? 'p' : 'a'}`;
-}
-
-/** Short day label from a YYYY-MM-DD dateKey */
-function dayLabel(dateKey: string): string {
-  const todayKey    = hiDateKey(new Date());
+function dayShortLabel(dateKey: string): string {
+  const todayKey = hiDateKey(new Date());
   const tomorrowKey = hiDateKey(new Date(Date.now() + 24 * 3600_000));
   if (dateKey === todayKey) return 'TODAY';
   if (dateKey === tomorrowKey) return 'TMW';
   const d = new Date(dateKey + 'T12:00:00Z');
-  const days = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
-  return days[d.getUTCDay()];
+  return ['SUN','MON','TUE','WED','THU','FRI','SAT'][d.getUTCDay()];
 }
 
-/** Format "YYYY-MM-DD" → "MON APR 28" or "TODAY" / "TOMORROW" */
-function fmtDayLabel(dateKey: string, todayKey: string, tomorrowKey: string): string {
-  if (dateKey === todayKey) return 'TODAY';
-  if (dateKey === tomorrowKey) return 'TOMORROW';
-  const d = new Date(dateKey + 'T12:00:00Z');
-  const days   = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
-  const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
-  return `${days[d.getUTCDay()]}  ${months[d.getUTCMonth()]} ${d.getUTCDate()}`;
+// ── Chart layout constants ────────────────────────────────────────────────────
+
+const PAD_L = 34;
+const PAD_R = 10;
+const PAD_T = 24;
+const PAD_B = 20;
+
+// ── Shared: build day-boundary list from any forecast array ──────────────────
+
+interface DayBound { x: number; label: string; isToday: boolean }
+
+function buildDayBounds(
+  times: Date[],
+  t0: number,
+  tRange: number,
+  chartW: number,
+): DayBound[] {
+  const todayKey = hiDateKey(new Date());
+  const bounds: DayBound[] = [];
+  let prevKey = hiDateKey(times[0]);
+  bounds.push({ x: 0, label: dayShortLabel(prevKey), isToday: prevKey === todayKey });
+  for (let i = 1; i < times.length; i++) {
+    const k = hiDateKey(times[i]);
+    if (k !== prevKey) {
+      bounds.push({
+        x: ((times[i].getTime() - t0) / tRange) * chartW,
+        label: dayShortLabel(k),
+        isToday: k === todayKey,
+      });
+      prevKey = k;
+    }
+  }
+  return bounds;
 }
 
-function htFt(m: number): number {
-  return Math.round(m * 3.28084 * 10) / 10;
-}
+// ── Wave chart ────────────────────────────────────────────────────────────────
 
-// ── Direction arrow (reuse same polygon style as main app) ────────────────────
-
-function arrowPoints(cx: number, cy: number, size: number, travelDeg: number): string {
-  const r = size * 0.42, headW = size * 0.34, headH = size * 0.40, shaftW = size * 0.13;
-  const pts: [number, number][] = [
-    [0,-r],[headW/2,-r+headH],[shaftW/2,-r+headH],[shaftW/2,r],
-    [-shaftW/2,r],[-shaftW/2,-r+headH],[-headW/2,-r+headH],
-  ];
-  const rad = travelDeg * Math.PI / 180;
-  const cos = Math.cos(rad), sin = Math.sin(rad);
-  return pts.map(([px,py]) => `${cx+px*cos-py*sin},${cy+px*sin+py*cos}`).join(' ');
-}
-
-function DirArrow({ deg, size, color }: { deg: number; size: number; color: string }) {
-  const travel = (deg + 180) % 360;
-  return (
-    <Svg width={size} height={size}>
-      <Polygon points={arrowPoints(size/2, size/2, size, travel)} fill={color} />
-    </Svg>
-  );
-}
-
-// ── Category badge ────────────────────────────────────────────────────────────
-
-const CAT_COLOR: Record<SwellCategory, string> = {
-  S: '#446688', M: '#448866', L: '#886644', XL: '#884444', XXL: '#662244',
-};
-
-function CatBadge({ cat }: { cat: SwellCategory }) {
-  return (
-    <View style={[badge.wrap, { borderColor: CAT_COLOR[cat] }]}>
-      <Text style={[badge.text, { color: CAT_COLOR[cat] }]}>{cat}</Text>
-    </View>
-  );
-}
-const badge = StyleSheet.create({
-  wrap:  { borderWidth: 1, borderRadius: 3, paddingHorizontal: 5, paddingVertical: 1, alignSelf: 'center' },
-  text:  { fontFamily: 'Courier', fontWeight: '700', fontSize: 11, letterSpacing: 1 },
-});
-
-// ── Wave forecast chart ───────────────────────────────────────────────────────
-
-const CHART_PAD_LEFT  = 34;
-const CHART_PAD_RIGHT = 10;
-const CHART_PAD_TOP   = 22;
-const CHART_PAD_BOT   = 20;
-
-interface ChartProps {
-  forecast: WaveForecastPoint[];
-  width: number;
-  height: number;
-  theme: any;
-}
-
-function WaveForecastChart({ forecast, width, height, theme }: ChartProps) {
-  const chartW = Math.max(width - CHART_PAD_LEFT - CHART_PAD_RIGHT, 1);
-  const chartH = height - CHART_PAD_TOP - CHART_PAD_BOT;
+function WaveChart({
+  forecast, width, height, theme,
+}: { forecast: WaveForecastPoint[]; width: number; height: number; theme: any }) {
+  const chartW = Math.max(width - PAD_L - PAD_R, 1);
+  const chartH = height - PAD_T - PAD_B;
 
   const { path, yLabels, dayBounds, nowX, nowY, peakPerDay } = useMemo(() => {
-    const empty = { path: '', yLabels: [] as {y:number;label:string}[], dayBounds: [] as {x:number;label:string;isToday:boolean}[], nowX: null as number|null, nowY: null as number|null, peakPerDay: [] as {x:number;y:number;label:string}[] };
+    type PeakEntry = { x: number; y: number; ft: number };
+    const empty = {
+      path: '', yLabels: [] as { y: number; label: string }[],
+      dayBounds: [] as DayBound[], nowX: null as number | null,
+      nowY: null as number | null, peakPerDay: [] as PeakEntry[],
+    };
     if (forecast.length < 2) return empty;
 
     const t0 = forecast[0].time.getTime();
     const t1 = forecast[forecast.length - 1].time.getTime();
     const tRange = t1 - t0;
 
-    const heights = forecast.map(p => htFt(p.heightM));
-    const maxHt = Math.max(...heights);
-    // Round up to nearest foot, add 0.5ft buffer
-    const yMax = Math.ceil(maxHt) + 0.5;
-    const yMin = 0;
+    const toFt = (m: number) => m * 3.28084;
+    const heights = forecast.map(p => toFt(p.heightM));
+    const yMax = Math.ceil(Math.max(...heights)) + 0.5;
 
-    const xScale = (t: number) => ((t - t0) / tRange) * chartW;
-    const yScale = (ft: number) => chartH - ((ft - yMin) / (yMax - yMin)) * chartH;
+    const xS = (t: number) => ((t - t0) / tRange) * chartW;
+    const yS = (ft: number) => chartH - (ft / yMax) * chartH;
 
-    // Build path
+    // Path
     let pathStr = '';
     forecast.forEach((pt, i) => {
-      const x = xScale(pt.time.getTime());
-      const y = yScale(htFt(pt.heightM));
-      pathStr += i === 0 ? `M ${x.toFixed(1)},${y.toFixed(1)}` : ` L ${x.toFixed(1)},${y.toFixed(1)}`;
+      const x = xS(pt.time.getTime()).toFixed(1);
+      const y = yS(toFt(pt.heightM)).toFixed(1);
+      pathStr += i === 0 ? `M ${x},${y}` : ` L ${x},${y}`;
     });
 
-    // Day boundaries (when Hawaii date key changes)
-    const todayKey = hiDateKey(new Date());
-    const bounds: {x:number;label:string;isToday:boolean}[] = [];
-    let prevKey = hiDateKey(forecast[0].time);
-    // Add label for the first day at x=0
-    bounds.push({ x: 0, label: dayLabel(prevKey), isToday: prevKey === todayKey });
-    for (let i = 1; i < forecast.length; i++) {
-      const k = hiDateKey(forecast[i].time);
-      if (k !== prevKey) {
-        bounds.push({ x: xScale(forecast[i].time.getTime()), label: dayLabel(k), isToday: k === todayKey });
-        prevKey = k;
-      }
-    }
-
-    // Y-axis labels
-    const yStep = yMax > 8 ? 2 : yMax > 4 ? 1 : 0.5;
-    const yLabelArr: {y:number;label:string}[] = [];
+    // Y labels
+    const yStep = yMax > 8 ? 2 : 1;
+    const yLbls: { y: number; label: string }[] = [];
     for (let ft = 0; ft <= yMax; ft += yStep) {
-      if (ft > yMax) break;
-      yLabelArr.push({ y: yScale(ft), label: `${ft.toFixed(0)}` });
+      yLbls.push({ y: yS(ft), label: `${ft}` });
     }
 
-    // Peak per day annotations
-    const dayMap = new Map<string, {x:number;y:number;label:string}>();
+    // Day bounds
+    const bounds = buildDayBounds(forecast.map(p => p.time), t0, tRange, chartW);
+
+    // Peak per day
+    const dayMap = new Map<string, PeakEntry>();
     forecast.forEach(pt => {
       const k = hiDateKey(pt.time);
-      const ft = htFt(pt.heightM);
-      const x = xScale(pt.time.getTime());
-      const y = yScale(ft);
-      const existing = dayMap.get(k);
-      if (!existing || ft > parseFloat(existing.label)) {
-        dayMap.set(k, { x, y, label: ft.toFixed(1) });
+      const ft = toFt(pt.heightM);
+      const ex = dayMap.get(k);
+      if (!ex || ft > ex.ft) {
+        dayMap.set(k, { x: xS(pt.time.getTime()), y: yS(ft), ft });
       }
     });
-    const peakArr = Array.from(dayMap.values());
 
-    // Current time
+    // Now dot
     const now = Date.now();
-    let nowXVal: number | null = null;
-    let nowYVal: number | null = null;
+    let nowX: number | null = null;
+    let nowY: number | null = null;
     if (now >= t0 && now <= t1) {
-      nowXVal = xScale(now);
+      nowX = xS(now);
       for (let i = 0; i < forecast.length - 1; i++) {
-        if (now >= forecast[i].time.getTime() && now <= forecast[i+1].time.getTime()) {
-          const t = (now - forecast[i].time.getTime()) / (forecast[i+1].time.getTime() - forecast[i].time.getTime());
-          const ft = htFt(forecast[i].heightM) + (htFt(forecast[i+1].heightM) - htFt(forecast[i].heightM)) * t;
-          nowYVal = yScale(ft);
+        const ta = forecast[i].time.getTime(), tb = forecast[i + 1].time.getTime();
+        if (now >= ta && now <= tb) {
+          const t = (now - ta) / (tb - ta);
+          const ft = toFt(forecast[i].heightM) + (toFt(forecast[i + 1].heightM) - toFt(forecast[i].heightM)) * t;
+          nowY = yS(ft);
           break;
         }
       }
     }
 
-    return { path: pathStr, yLabels: yLabelArr, dayBounds: bounds, nowX: nowXVal, nowY: nowYVal, peakPerDay: peakArr };
+    return { path: pathStr, yLabels: yLbls, dayBounds: bounds, nowX, nowY, peakPerDay: Array.from(dayMap.values()) };
   }, [forecast, chartW, chartH]);
 
-  const svgH = height;
-
   return (
-    <Svg width={width} height={svgH}>
-      {/* Y-axis labels */}
-      {yLabels.map((lbl, i) => (
-        <SvgText
-          key={i}
-          x={CHART_PAD_LEFT - 4}
-          y={CHART_PAD_TOP + lbl.y + 4}
-          fontSize={9}
-          fontFamily="Courier"
-          fill={theme.muted}
-          textAnchor="end"
-        >
-          {lbl.label}
+    <Svg width={width} height={height}>
+      {/* Y labels */}
+      {yLabels.map((l, i) => (
+        <SvgText key={i} x={PAD_L - 4} y={PAD_T + l.y + 4}
+          fontSize={9} fontFamily="Courier" fill={theme.muted} textAnchor="end">
+          {l.label}
         </SvgText>
       ))}
 
-      {/* Day boundary vertical lines + labels */}
-      {dayBounds.map((b, i) => {
-        const cx = CHART_PAD_LEFT + b.x;
-        return (
-          <React.Fragment key={i}>
-            {i > 0 && (
-              <Line
-                x1={cx} y1={CHART_PAD_TOP}
-                x2={cx} y2={CHART_PAD_TOP + chartH}
-                stroke={theme.accentDim}
-                strokeWidth={0.5}
-                strokeDasharray="3,4"
-                opacity={0.5}
-              />
-            )}
-            <SvgText
-              x={cx + (i === 0 ? 0 : 3)}
-              y={svgH - 4}
-              fontSize={9}
-              fontFamily="Courier"
-              fontWeight="700"
-              fill={b.isToday ? theme.accent : theme.muted}
-              textAnchor={i === 0 ? 'start' : 'start'}
-            >
-              {b.label}
-            </SvgText>
-          </React.Fragment>
-        );
-      })}
+      {/* Day boundaries */}
+      {dayBounds.map((b, i) => (
+        <React.Fragment key={i}>
+          {i > 0 && (
+            <Line x1={PAD_L + b.x} y1={PAD_T} x2={PAD_L + b.x} y2={PAD_T + chartH}
+              stroke={theme.accentDim} strokeWidth={0.5} strokeDasharray="3,4" opacity={0.5} />
+          )}
+          <SvgText x={PAD_L + b.x + (i === 0 ? 0 : 3)} y={height - 4}
+            fontSize={9} fontFamily="Courier" fontWeight="700"
+            fill={b.isToday ? theme.accent : theme.muted} textAnchor="start">
+            {b.label}
+          </SvgText>
+        </React.Fragment>
+      ))}
 
-      {/* Wave curve */}
+      {/* Curve */}
       {path ? (
-        <Path
-          d={path}
-          stroke={theme.accent}
-          strokeWidth={1.5}
-          fill="none"
-          transform={`translate(${CHART_PAD_LEFT}, ${CHART_PAD_TOP})`}
-        />
+        <Path d={path} stroke={theme.accent} strokeWidth={1.5} fill="none"
+          transform={`translate(${PAD_L},${PAD_T})`} />
       ) : null}
 
-      {/* Peak height labels per day */}
+      {/* Peak labels */}
       {peakPerDay.map((p, i) => (
-        <SvgText
-          key={i}
-          x={CHART_PAD_LEFT + p.x}
-          y={CHART_PAD_TOP + p.y - 6}
-          fontSize={9}
-          fontFamily="Courier"
-          fontWeight="700"
-          fill={theme.textPrimary}
-          textAnchor="middle"
-        >
-          {p.label}
+        <SvgText key={i} x={PAD_L + p.x} y={PAD_T + p.y - 6}
+          fontSize={9} fontFamily="Courier" fontWeight="700"
+          fill={theme.textPrimary} textAnchor="middle">
+          {p.ft.toFixed(1)}
         </SvgText>
       ))}
 
-      {/* Current time dot */}
+      {/* Now dot */}
       {nowX !== null && nowY !== null && (
-        <Circle
-          cx={CHART_PAD_LEFT + nowX}
-          cy={CHART_PAD_TOP + nowY}
-          r={4}
-          fill={theme.accent}
-        />
+        <Circle cx={PAD_L + nowX} cy={PAD_T + nowY} r={4} fill={theme.accent} />
       )}
     </Svg>
   );
 }
 
-// ── Daily summary ─────────────────────────────────────────────────────────────
+// ── Wind chart ────────────────────────────────────────────────────────────────
 
-interface DayData {
-  dateKey: string;
-  points: WaveForecastPoint[];
-  peakHtM: number;
-  peakPt: WaveForecastPoint;
-  amPeak: WaveForecastPoint | null;
-  pmPeak: WaveForecastPoint | null;
+function WindChart({
+  forecast, width, height, theme,
+}: { forecast: WindForecastPoint[]; width: number; height: number; theme: any }) {
+  const chartW = Math.max(width - PAD_L - PAD_R, 1);
+  const chartH = height - PAD_T - PAD_B;
+
+  const { path, yLabels, dayBounds, nowX, nowY } = useMemo(() => {
+    const empty = {
+      path: '', yLabels: [] as { y: number; label: string }[],
+      dayBounds: [] as DayBound[], nowX: null as number | null, nowY: null as number | null,
+    };
+    if (forecast.length < 2) return empty;
+
+    const t0 = forecast[0].time.getTime();
+    const t1 = forecast[forecast.length - 1].time.getTime();
+    const tRange = t1 - t0;
+
+    const speeds = forecast.map(p => p.speedKt);
+    const yMax = Math.ceil(Math.max(...speeds) / 5) * 5 + 5; // round up to next 5kt
+
+    const xS = (t: number) => ((t - t0) / tRange) * chartW;
+    const yS = (kt: number) => chartH - (kt / yMax) * chartH;
+
+    // Path
+    let pathStr = '';
+    forecast.forEach((pt, i) => {
+      const x = xS(pt.time.getTime()).toFixed(1);
+      const y = yS(pt.speedKt).toFixed(1);
+      pathStr += i === 0 ? `M ${x},${y}` : ` L ${x},${y}`;
+    });
+
+    // Y labels (every 5 kt)
+    const yLbls: { y: number; label: string }[] = [];
+    for (let kt = 0; kt <= yMax; kt += 5) {
+      yLbls.push({ y: yS(kt), label: `${kt}` });
+    }
+
+    // Day bounds
+    const bounds = buildDayBounds(forecast.map(p => p.time), t0, tRange, chartW);
+
+    // Now dot
+    const now = Date.now();
+    let nowX: number | null = null;
+    let nowY: number | null = null;
+    if (now >= t0 && now <= t1) {
+      nowX = xS(now);
+      for (let i = 0; i < forecast.length - 1; i++) {
+        const ta = forecast[i].time.getTime(), tb = forecast[i + 1].time.getTime();
+        if (now >= ta && now <= tb) {
+          const t = (now - ta) / (tb - ta);
+          const kt = forecast[i].speedKt + (forecast[i + 1].speedKt - forecast[i].speedKt) * t;
+          nowY = yS(kt);
+          break;
+        }
+      }
+    }
+
+    return { path: pathStr, yLabels: yLbls, dayBounds: bounds, nowX, nowY };
+  }, [forecast, chartW, chartH]);
+
+  return (
+    <Svg width={width} height={height}>
+      {/* Y labels */}
+      {yLabels.map((l, i) => (
+        <SvgText key={i} x={PAD_L - 4} y={PAD_T + l.y + 4}
+          fontSize={9} fontFamily="Courier" fill={theme.muted} textAnchor="end">
+          {l.label}
+        </SvgText>
+      ))}
+
+      {/* Day boundaries */}
+      {dayBounds.map((b, i) => (
+        <React.Fragment key={i}>
+          {i > 0 && (
+            <Line x1={PAD_L + b.x} y1={PAD_T} x2={PAD_L + b.x} y2={PAD_T + chartH}
+              stroke={theme.accentDim} strokeWidth={0.5} strokeDasharray="3,4" opacity={0.5} />
+          )}
+          <SvgText x={PAD_L + b.x + (i === 0 ? 0 : 3)} y={height - 4}
+            fontSize={9} fontFamily="Courier" fontWeight="700"
+            fill={b.isToday ? theme.accent : theme.muted} textAnchor="start">
+            {b.label}
+          </SvgText>
+        </React.Fragment>
+      ))}
+
+      {/* Curve */}
+      {path ? (
+        <Path d={path} stroke={theme.accentDim} strokeWidth={1.5} fill="none"
+          transform={`translate(${PAD_L},${PAD_T})`} />
+      ) : null}
+
+      {/* Now dot */}
+      {nowX !== null && nowY !== null && (
+        <Circle cx={PAD_L + nowX} cy={PAD_T + nowY} r={4} fill={theme.accentDim} />
+      )}
+    </Svg>
+  );
 }
 
-function groupByDay(pts: WaveForecastPoint[]): DayData[] {
-  const map = new Map<string, WaveForecastPoint[]>();
-  pts.forEach(p => {
-    const k = hiDateKey(p.time);
-    if (!map.has(k)) map.set(k, []);
-    map.get(k)!.push(p);
-  });
-  return Array.from(map.entries()).map(([dateKey, points]) => {
-    const peakPt = points.reduce((a, b) => b.heightM > a.heightM ? b : a);
-    const am = points.filter(p => hiHour(p.time) < 12);
-    const pm = points.filter(p => hiHour(p.time) >= 12);
-    const amPeak = am.length ? am.reduce((a,b) => b.heightM > a.heightM ? b : a) : null;
-    const pmPeak = pm.length ? pm.reduce((a,b) => b.heightM > a.heightM ? b : a) : null;
-    return { dateKey, points, peakHtM: peakPt.heightM, peakPt, amPeak, pmPeak };
-  });
+// ── Section label ─────────────────────────────────────────────────────────────
+
+function SectionLabel({ text, unit, theme }: { text: string; unit: string; theme: any }) {
+  return (
+    <View style={sl.row}>
+      <Text style={[sl.label, { color: theme.muted }]}>{text}</Text>
+      <Text style={[sl.unit, { color: theme.muted }]}>{unit}</Text>
+    </View>
+  );
 }
+const sl = StyleSheet.create({
+  row:   { flexDirection: 'row', alignItems: 'baseline', gap: 6, marginTop: 16, marginBottom: 2 },
+  label: { fontFamily: 'Courier', fontWeight: '700', fontSize: 10, letterSpacing: 3 },
+  unit:  { fontFamily: 'Courier', fontSize: 9, letterSpacing: 1 },
+});
 
 // ── Forecast page ─────────────────────────────────────────────────────────────
 
@@ -337,119 +325,50 @@ interface ForecastPageProps {
 
 export function ForecastPage({ height, theme, stationId }: ForecastPageProps) {
   const coords = FORECAST_COORDS[stationId] ?? FORECAST_COORDS.kahului;
-  const { forecast, loading, error } = useWaveForecast(coords.lat, coords.lon);
-  const [expandedDay, setExpandedDay] = useState<string | null>(null);
 
-  const todayKey    = hiDateKey(new Date());
-  const tomorrowKey = hiDateKey(new Date(Date.now() + 24 * 3600_000));
+  const { forecast: waveFc, loading: waveLoading, error: waveErr } = useWaveForecast(coords.lat, coords.lon);
+  const { forecast: windFc, loading: windLoading, error: windErr } = useWindForecast(coords.lat, coords.lon);
 
-  const days = useMemo(() => groupByDay(forecast), [forecast]);
+  const loading = (waveLoading && waveFc.length === 0) || (windLoading && windFc.length === 0);
+  const error = waveErr ?? windErr ?? null;
 
-  const chartHeight = 160;
+  const chartW = SCREEN_W - 28;
+  const waveH  = 160;
+  const windH  = 130;
 
   return (
     <View style={height ? { height, width: SCREEN_W } : { flex: 1 }}>
       {/* Header */}
-      <View style={styles.pageHeader}>
-        <View style={styles.pageHeaderRow}>
+      <View style={styles.header}>
+        <View style={styles.headerRow}>
           <Text style={[styles.title, { color: theme.accent }]}>FORECAST</Text>
-          <Text style={[styles.subtitle, { color: theme.muted }]}>{coords.label}  · WW3</Text>
+          <Text style={[styles.subtitle, { color: theme.muted }]}>{coords.label}  · WW3 / WRF</Text>
         </View>
         <View style={[styles.divider, { backgroundColor: theme.accent }]} />
       </View>
 
-      {loading && forecast.length === 0 ? (
+      {loading ? (
         <View style={styles.center}>
           <ActivityIndicator color={theme.accent} />
-          <Text style={[styles.loadingText, { color: theme.muted }]}>LOADING WW3 MODEL…</Text>
+          <Text style={[styles.loadingText, { color: theme.muted }]}>LOADING MODEL DATA…</Text>
         </View>
       ) : error ? (
         <View style={styles.center}>
           <Text style={[styles.errorText, { color: theme.muted }]}>{error}</Text>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={styles.scroll}>
-          {/* Wave height chart */}
-          {forecast.length > 0 && (
-            <View style={[styles.chartWrap, { borderColor: theme.accentDim }]}>
-              <WaveForecastChart
-                forecast={forecast}
-                width={SCREEN_W - 28}
-                height={chartHeight}
-                theme={theme}
-              />
-            </View>
-          )}
+        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+          {/* Wave height */}
+          <SectionLabel text="WAVE HEIGHT" unit="ft" theme={theme} />
+          <View style={[styles.chartBox, { borderColor: theme.accentDim }]}>
+            <WaveChart forecast={waveFc} width={chartW} height={waveH} theme={theme} />
+          </View>
 
-          {/* Daily summary rows */}
-          {days.map(day => {
-            const expanded = expandedDay === day.dateKey;
-            const cat = categorize(htFt(day.peakHtM));
-            const label = fmtDayLabel(day.dateKey, todayKey, tomorrowKey);
-            const dir = getCardinalDirection(day.peakPt.directionDeg) ?? '--';
-
-            return (
-              <View key={day.dateKey}>
-                <TouchableOpacity
-                  activeOpacity={0.7}
-                  onPress={() => setExpandedDay(expanded ? null : day.dateKey)}
-                >
-                  <View style={styles.dayRow}>
-                    {/* Date */}
-                    <View style={styles.dayLeft}>
-                      <Text style={[styles.dayLabel, { color: day.dateKey === todayKey ? theme.accent : theme.textPrimary }]}>{label}</Text>
-                      <Text style={[styles.dayDir, { color: theme.muted }]}>{dir}  {day.peakPt.period.toFixed(0)}s</Text>
-                    </View>
-                    {/* Peak */}
-                    <View style={styles.dayMid}>
-                      <Text style={[styles.dayHt, { color: theme.textPrimary }]}>
-                        {htFt(day.peakHtM).toFixed(1)}ft
-                      </Text>
-                      {day.amPeak && day.pmPeak && (
-                        <Text style={[styles.dayAmPm, { color: theme.muted }]}>
-                          {htFt(day.amPeak.heightM).toFixed(1)}↑{htFt(day.pmPeak.heightM).toFixed(1)}
-                        </Text>
-                      )}
-                    </View>
-                    {/* Badge + arrow */}
-                    <View style={styles.dayRight}>
-                      <CatBadge cat={cat} />
-                      <DirArrow deg={day.peakPt.directionDeg} size={22} color={theme.accentDim} />
-                    </View>
-                  </View>
-                </TouchableOpacity>
-
-                {/* Expanded hourly rows */}
-                {expanded && (
-                  <View style={[styles.hourlyBlock, { borderLeftColor: theme.accentDim }]}>
-                    {day.points.map((pt, i) => {
-                      const ht = htFt(pt.heightM);
-                      const hDir = getCardinalDirection(pt.directionDeg) ?? '--';
-                      return (
-                        <View key={i} style={styles.hourRow}>
-                          <Text style={[styles.hourTime, { color: theme.muted }]}>
-                            {fmtHiTime(pt.time)}
-                          </Text>
-                          <Text style={[styles.hourHt, { color: theme.textPrimary }]}>
-                            {ht.toFixed(1)}ft
-                          </Text>
-                          <Text style={[styles.hourPer, { color: theme.muted }]}>
-                            {pt.period.toFixed(0)}s
-                          </Text>
-                          <Text style={[styles.hourDir, { color: theme.muted }]}>
-                            {hDir}
-                          </Text>
-                          <DirArrow deg={pt.directionDeg} size={16} color={theme.accentDim} />
-                        </View>
-                      );
-                    })}
-                  </View>
-                )}
-
-                <View style={[styles.rowDivider, { backgroundColor: theme.accentDim }]} />
-              </View>
-            );
-          })}
+          {/* Wind speed */}
+          <SectionLabel text="WIND SPEED" unit="kt" theme={theme} />
+          <View style={[styles.chartBox, { borderColor: theme.accentDim }]}>
+            <WindChart forecast={windFc} width={chartW} height={windH} theme={theme} />
+          </View>
         </ScrollView>
       )}
     </View>
@@ -457,40 +376,14 @@ export function ForecastPage({ height, theme, stationId }: ForecastPageProps) {
 }
 
 const styles = StyleSheet.create({
-  pageHeader:    { paddingHorizontal: 14, paddingTop: 14, paddingBottom: 4 },
-  pageHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
-  title:         { fontFamily: 'Courier', fontWeight: '900', fontSize: 18, letterSpacing: 4 },
-  subtitle:      { fontFamily: 'Courier', fontSize: 10, letterSpacing: 1 },
-  divider:       { height: 1, opacity: 0.55, marginTop: 8 },
-  scroll:        { paddingHorizontal: 14, paddingBottom: 20 },
-  center:        { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
-  loadingText:   { fontFamily: 'Courier', fontSize: 11, letterSpacing: 2 },
-  errorText:     { fontFamily: 'Courier', fontSize: 11, letterSpacing: 1 },
-
-  chartWrap: {
-    borderWidth: 1,
-    borderRadius: 4,
-    overflow: 'hidden',
-    marginBottom: 14,
-    opacity: 0.95,
-  },
-
-  dayRow:  { flexDirection: 'row', alignItems: 'center', paddingVertical: 12 },
-  dayLeft: { flex: 1 },
-  dayMid:  { alignItems: 'center', marginHorizontal: 12 },
-  dayRight:{ alignItems: 'center', gap: 4 },
-
-  dayLabel: { fontFamily: 'Courier', fontWeight: '700', fontSize: 12, letterSpacing: 2 },
-  dayDir:   { fontFamily: 'Courier', fontSize: 10, letterSpacing: 1, marginTop: 3 },
-  dayHt:    { fontFamily: 'Courier', fontWeight: '700', fontSize: 20, letterSpacing: 1 },
-  dayAmPm:  { fontFamily: 'Courier', fontSize: 9, letterSpacing: 0.5, marginTop: 2 },
-
-  hourlyBlock: { borderLeftWidth: 2, marginLeft: 8, paddingLeft: 10, paddingBottom: 6 },
-  hourRow:     { flexDirection: 'row', alignItems: 'center', paddingVertical: 5, gap: 10 },
-  hourTime:    { fontFamily: 'Courier', fontSize: 10, letterSpacing: 0.5, width: 52 },
-  hourHt:      { fontFamily: 'Courier', fontWeight: '600', fontSize: 13, letterSpacing: 1, width: 48 },
-  hourPer:     { fontFamily: 'Courier', fontSize: 10, letterSpacing: 0.5, width: 28 },
-  hourDir:     { fontFamily: 'Courier', fontSize: 10, letterSpacing: 0.5, width: 30 },
-
-  rowDivider: { height: 1, opacity: 0.4 },
+  header:      { paddingHorizontal: 14, paddingTop: 14, paddingBottom: 4 },
+  headerRow:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
+  title:       { fontFamily: 'Courier', fontWeight: '900', fontSize: 18, letterSpacing: 4 },
+  subtitle:    { fontFamily: 'Courier', fontSize: 10, letterSpacing: 1 },
+  divider:     { height: 1, opacity: 0.55, marginTop: 8 },
+  scroll:      { paddingHorizontal: 14, paddingBottom: 28 },
+  center:      { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  loadingText: { fontFamily: 'Courier', fontSize: 11, letterSpacing: 2 },
+  errorText:   { fontFamily: 'Courier', fontSize: 11, letterSpacing: 1 },
+  chartBox:    { borderWidth: 1, borderRadius: 4, overflow: 'hidden' },
 });
