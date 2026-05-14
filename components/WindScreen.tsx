@@ -6,7 +6,9 @@ import {
   RefreshControl,
   StyleSheet,
   Dimensions,
+  TouchableOpacity,
 } from 'react-native';
+import { useRouter } from 'expo-router';
 import { NEARSHORE_STATIONS } from '../constants/buoys';
 import { Theme } from '../constants/colors';
 import { WindReading } from '../hooks/useWindData';
@@ -35,6 +37,7 @@ interface WindScreenProps {
 }
 
 export default function WindScreen({ windData, height, refreshing, onRefresh, theme }: WindScreenProps) {
+  const router = useRouter();
   return (
     <ScrollView
       style={{ width: SCREEN_W, height, backgroundColor: theme.background }}
@@ -48,7 +51,16 @@ export default function WindScreen({ windData, height, refreshing, onRefresh, th
         />
       }
     >
-      <Text style={[styles.screenTitle, { color: theme.accent }]}>WIND DATA</Text>
+      <View style={styles.titleRow}>
+        <Text style={[styles.screenTitle, { color: theme.accent }]}>WIND DATA</Text>
+        <TouchableOpacity
+          onPress={() => router.push('/micwind')}
+          style={[styles.micBtn, { borderColor: theme.accent }]}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.micBtnText, { color: theme.accent }]}>MIC</Text>
+        </TouchableOpacity>
+      </View>
       <View style={[styles.titleDivider, { backgroundColor: theme.accent }]} />
 
       {NEARSHORE_STATIONS.map((station) => {
@@ -109,12 +121,29 @@ const styles = StyleSheet.create({
     paddingTop: 14,
     paddingBottom: 20,
   },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
   screenTitle: {
     fontSize: 18,
     fontFamily: 'Courier',
     fontWeight: '900',
     letterSpacing: 4,
-    marginBottom: 8,
+  },
+  micBtn: {
+    borderWidth: 1.5,
+    borderRadius: 3,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+  },
+  micBtnText: {
+    fontSize: 11,
+    fontFamily: 'Courier',
+    fontWeight: '700',
+    letterSpacing: 2,
   },
   titleDivider: {
     height: 1,

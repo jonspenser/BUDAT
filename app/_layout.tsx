@@ -13,6 +13,7 @@ export default function RootLayout() {
         <Stack.Screen name="forecast" options={{ gestureEnabled: true, gestureDirection: 'horizontal' }} />
         <Stack.Screen name="logbook" options={{ gestureEnabled: true, gestureDirection: 'horizontal' }} />
         <Stack.Screen name="alerts" options={{ gestureEnabled: true, gestureDirection: 'horizontal' }} />
+        <Stack.Screen name="micwind" options={{ gestureEnabled: true, gestureDirection: 'horizontal' }} />
       </Stack>
     </SwellLogProvider>
   );
