@@ -127,9 +127,10 @@ function BeaufortBar({ beaufortFractional, isRecording, theme }: GaugeProps) {
 
 interface Props {
   theme: Theme;
+  height?: number;
 }
 
-export default function MicWindScreen({ theme }: Props) {
+export default function MicWindScreen({ theme, height }: Props) {
   const mic = useMicWind();
 
   useEffect(() => {
@@ -148,7 +149,7 @@ export default function MicWindScreen({ theme }: Props) {
 
   return (
     <ScrollView
-      style={[styles.container, { backgroundColor: theme.background }]}
+      style={[styles.container, { backgroundColor: theme.background, width: W, height: height }]}
       contentContainerStyle={styles.content}
     >
       <Text style={[styles.title, { color: theme.accent }]}>MIC WIND</Text>

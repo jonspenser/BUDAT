@@ -33,6 +33,7 @@ import TideChart from '../components/TideChart';
 import DataScreen from '../components/DataScreen';
 import { LogbookPage } from './logbook';
 import { ForecastPage } from './forecast';
+import MicWindScreen from '../components/MicWindScreen';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 const TIDE_H = Math.floor(SCREEN_H * 0.38);
@@ -468,7 +469,7 @@ function BuoyGrid({ nearshoreData, theme, onBuoyPress }: BuoyGridProps) {
   );
 }
 
-const SCREEN_LABELS = ['MAP', 'DATA', 'FORECAST', 'LOG'] as const;
+const SCREEN_LABELS = ['MAP', 'DATA', 'FORECAST', 'LOG', 'MIC'] as const;
 
 // Hawaii winter = Nov–Apr (north swells dominate)
 function isHawaiiWinter(): boolean {
@@ -756,7 +757,7 @@ export default function HomeScreen() {
                 )}
               </View>
               <View style={styles.swipeHint}>
-                <Text style={[styles.swipeText, { color: theme.muted }]}>SWIPE → DATA · LOG</Text>
+                <Text style={[styles.swipeText, { color: theme.muted }]}>SWIPE → DATA · LOG · MIC</Text>
               </View>
             </ScrollView>
 
@@ -778,6 +779,9 @@ export default function HomeScreen() {
 
             {/* ── Page 3: Log Book ── */}
             <LogbookPage height={pagerHeight} theme={theme} />
+
+            {/* ── Page 4: Mic Wind ── */}
+            <MicWindScreen height={pagerHeight} theme={theme} />
           </>
         )}
       </ScrollView>
