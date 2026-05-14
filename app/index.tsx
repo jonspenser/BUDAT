@@ -470,6 +470,7 @@ function BuoyGrid({ nearshoreData, theme, onBuoyPress }: BuoyGridProps) {
 }
 
 const SCREEN_LABELS = ['MAP', 'DATA', 'FORECAST', 'LOG', 'MIC'] as const;
+const REAL_PAGES = SCREEN_LABELS.length; // 5
 
 // Hawaii winter = Nov–Apr (north swells dominate)
 function isHawaiiWinter(): boolean {
@@ -552,6 +553,8 @@ export default function HomeScreen() {
   // ── Double-tap snapshot ──
   const { logSwell } = useSwellLogContext();
   const lastTapRef = useRef<number>(0);
+  const pagerRef = useRef<ScrollView>(null);
+  const pagerInitialized = useRef(false);
   const [snapshotMsg, setSnapshotMsg] = useState('');
 
   // ── Station selection ──
@@ -646,8 +649,22 @@ export default function HomeScreen() {
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const handleScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const page = Math.round(e.nativeEvent.contentOffset.x / SCREEN_W);
-    setActiveScreen(page);
+    // Virtual layout: [ghost-MIC, MAP, DATA, FORECAST, LOG, MIC, ghost-MAP]
+    // virtual index 0 and REAL_PAGES both correspond to real page REAL_PAGES-1 (MIC)
+    const virtualIndex = Math.round(e.nativeEvent.contentOffset.x / SCREEN_W);
+    const realIndex = ((virtualIndex - 1) % REAL_PAGES + REAL_PAGES) % REAL_PAGES;
+    setActiveScreen(realIndex);
+  }, []);
+
+  const handleMomentumScrollEnd = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const virtualIndex = Math.round(e.nativeEvent.contentOffset.x / SCREEN_W);
+    if (virtualIndex === 0) {
+      // Swiped right past MAP → jump to real MIC (virtual index REAL_PAGES)
+      pagerRef.current?.scrollTo({ x: SCREEN_W * REAL_PAGES, animated: false });
+    } else if (virtualIndex === REAL_PAGES + 1) {
+      // Swiped left past MIC → jump to real MAP (virtual index 1)
+      pagerRef.current?.scrollTo({ x: SCREEN_W, animated: false });
+    }
   }, []);
 
   const handleRefresh = useCallback(async () => {
@@ -668,6 +685,73 @@ export default function HomeScreen() {
     ]);
     setIsRefreshing(false);
   }, [nwBuoy, neBuoy, hanalei, waimeaBay, pauwela, barberspt, hilo, lanai, swBuoy, seBuoy, refetchTides, refetchWind]);
+
+  // On first layout, scroll past the ghost-MIC page so we start on MAP
+  useEffect(() => {
+    if (pagerHeight > 0 && !pagerInitialized.current) {
+      pagerInitialized.current = true;
+      setTimeout(() => {
+        pagerRef.current?.scrollTo({ x: SCREEN_W, animated: false });
+      }, 50);
+    }
+  }, [pagerHeight]);
+
+  // MAP page renders twice (real + ghost), so extract to avoid duplicating JSX
+  const renderMapTidePage = (isGhost = false) => (
+    <ScrollView
+      key={isGhost ? 'ghost-map' : 'real-map'}
+      style={{ width: SCREEN_W, height: pagerHeight }}
+      contentContainerStyle={{ flex: 1 }}
+      refreshControl={
+        isGhost ? undefined : (
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            tintColor={theme.accent}
+            colors={[theme.accent]}
+          />
+        )
+      }
+    >
+      <BuoyGrid nearshoreData={nearshoreData} theme={theme} onBuoyPress={handleBuoyPress} />
+      <View style={{ height: TIDE_H, backgroundColor: theme.background, marginTop: -2 }}>
+        <View style={{ height: WIND_INFO_H, justifyContent: 'center', alignItems: 'center', paddingBottom: 30, paddingTop: 80 }}>
+          <WindTideBar
+            windData={windData}
+            tideStation={selectedStation.name}
+            nowTideHeight={nowTideHeight}
+            nowTideLabel={nowTideLabel}
+            onStationPress={() => setStationPickerVisible(true)}
+            theme={theme}
+            dayOffset={tideOffset}
+          />
+        </View>
+        {tidesLoading && predictions.length === 0 ? (
+          <View style={styles.tideLoading}>
+            <ActivityIndicator color={theme.accent} />
+          </View>
+        ) : (
+          <View
+            onTouchStart={handleTideSwipeStart}
+            onTouchEnd={handleTideSwipeEnd}
+          >
+            <TideChart
+              predictions={predictions}
+              width={SCREEN_W}
+              height={TIDE_H - WIND_INFO_H}
+              theme={theme}
+              dayOffset={tideOffset}
+            />
+          </View>
+        )}
+      </View>
+      {!isGhost && (
+        <View style={styles.swipeHint}>
+          <Text style={[styles.swipeText, { color: theme.muted }]}>SWIPE → DATA · LOG · MIC</Text>
+        </View>
+      )}
+    </ScrollView>
+  );
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.background }]} onTouchEnd={handleDoubleTap}>
@@ -699,69 +783,28 @@ export default function HomeScreen() {
       </View>
       <View style={[styles.divider, { backgroundColor: theme.accent }]} />
 
-      {/* ── Horizontal pager ── */}
+      {/* ── Horizontal pager (looping via ghost pages) ── */}
+      {/* Virtual layout: [ghost-MIC | MAP | DATA | FORECAST | LOG | MIC | ghost-MAP] */}
       <ScrollView
+        ref={pagerRef}
         horizontal
         pagingEnabled
         showsHorizontalScrollIndicator={false}
         scrollEventThrottle={16}
         onScroll={handleScroll}
+        onMomentumScrollEnd={handleMomentumScrollEnd}
         style={{ flex: 1 }}
         onLayout={e => setPagerHeight(e.nativeEvent.layout.height)}
       >
         {pagerHeight > 0 && (
           <>
-            {/* ── Page 0: Map + Tide ── */}
-            <ScrollView
-              style={{ width: SCREEN_W, height: pagerHeight }}
-              contentContainerStyle={{ flex: 1 }}
-              refreshControl={
-                <RefreshControl
-                  refreshing={isRefreshing}
-                  onRefresh={handleRefresh}
-                  tintColor={theme.accent}
-                  colors={[theme.accent]}
-                />
-              }
-            >
-              <BuoyGrid nearshoreData={nearshoreData} theme={theme} onBuoyPress={handleBuoyPress} />
-              <View style={{ height: TIDE_H, backgroundColor: theme.background, marginTop: -2 }}>
-                <View style={{ height: WIND_INFO_H, justifyContent: 'center', alignItems: 'center', paddingBottom: 30, paddingTop: 80 }}>
-                  <WindTideBar
-                    windData={windData}
-                    tideStation={selectedStation.name}
-                    nowTideHeight={nowTideHeight}
-                    nowTideLabel={nowTideLabel}
-                    onStationPress={() => setStationPickerVisible(true)}
-                    theme={theme}
-                    dayOffset={tideOffset}
-                  />
-                </View>
-                {tidesLoading && predictions.length === 0 ? (
-                  <View style={styles.tideLoading}>
-                    <ActivityIndicator color={theme.accent} />
-                  </View>
-                ) : (
-                  <View
-                    onTouchStart={handleTideSwipeStart}
-                    onTouchEnd={handleTideSwipeEnd}
-                  >
-                    <TideChart
-                      predictions={predictions}
-                      width={SCREEN_W}
-                      height={TIDE_H - WIND_INFO_H}
-                      theme={theme}
-                      dayOffset={tideOffset}
-                    />
-                  </View>
-                )}
-              </View>
-              <View style={styles.swipeHint}>
-                <Text style={[styles.swipeText, { color: theme.muted }]}>SWIPE → DATA · LOG · MIC</Text>
-              </View>
-            </ScrollView>
+            {/* Ghost of last page — seen when swiping right on MAP */}
+            <MicWindScreen key="ghost-mic" height={pagerHeight} theme={theme} />
 
-            {/* ── Page 1: Wave Data ── */}
+            {/* Page 0 (MAP) */}
+            {renderMapTidePage()}
+
+            {/* Page 1: Wave Data */}
             <DataScreen
               stations={activeStations}
               nearshoreData={nearshoreData}
@@ -774,14 +817,17 @@ export default function HomeScreen() {
               onEditPress={() => router.push('/buoys')}
             />
 
-            {/* ── Page 2: Forecast ── */}
+            {/* Page 2: Forecast */}
             <ForecastPage height={pagerHeight} theme={theme} stationId={selectedStation.id} />
 
-            {/* ── Page 3: Log Book ── */}
+            {/* Page 3: Log Book */}
             <LogbookPage height={pagerHeight} theme={theme} />
 
-            {/* ── Page 4: Mic Wind ── */}
-            <MicWindScreen height={pagerHeight} theme={theme} />
+            {/* Page 4: Mic Wind */}
+            <MicWindScreen key="real-mic" height={pagerHeight} theme={theme} />
+
+            {/* Ghost of first page — seen when swiping left on MIC */}
+            {renderMapTidePage(true)}
           </>
         )}
       </ScrollView>
