@@ -207,7 +207,6 @@ function ResultScreen({ result, theme, onReset }: { result: NonNullable<MicWindR
       <Text style={[styles.resultCard, { color: theme.accent }]}>{result.cardinal}</Text>
       <View style={[styles.resultDivider, { backgroundColor: theme.accentDim }]} />
       <Text style={[styles.resultKts, { color: theme.textPrimary }]}>{result.knots} KT</Text>
-      <Text style={[styles.resultBf, { color: theme.muted }]}>{result.beaufortInfo.label}</Text>
       <TouchableOpacity
         style={[styles.button, { borderColor: theme.accent, backgroundColor: 'transparent', marginTop: 48 }]}
         onPress={onReset}
