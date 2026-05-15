@@ -235,6 +235,7 @@ export default function MicWindScreen({ theme, height }: Props) {
   const mic = useMicWind();
 
   useEffect(() => {
+    mic.start();
     return () => { mic.stop(); };
   }, []);
 
@@ -248,7 +249,7 @@ export default function MicWindScreen({ theme, height }: Props) {
         style={[styles.container, { backgroundColor: theme.background, width: W, height, transform: [{ rotate: '180deg' }] }]}
         contentContainerStyle={[styles.content, { justifyContent: 'center' }]}
       >
-        <ResultScreen result={mic.result} theme={theme} onReset={() => { mic.reset(); }} />
+        <ResultScreen result={mic.result} theme={theme} onReset={() => { mic.start(); }} />
       </ScrollView>
     );
   }
@@ -332,21 +333,9 @@ export default function MicWindScreen({ theme, height }: Props) {
         <Text style={[styles.error, { color: theme.accent }]}>{mic.error}</Text>
       )}
 
-      {!mic.isRecording && (
-        <Text style={[styles.hint, { color: theme.muted }]}>
-          Point phone at wind and slowly pan left and right to capture peak signal
-        </Text>
-      )}
-
-      <TouchableOpacity
-        style={[styles.button, { borderColor: theme.accent, backgroundColor: mic.isRecording ? theme.accent : 'transparent' }]}
-        onPress={mic.isRecording ? mic.stop : mic.start}
-        activeOpacity={0.7}
-      >
-        <Text style={[styles.buttonText, { color: mic.isRecording ? theme.background : theme.accent }]}>
-          {mic.isRecording ? 'STOP' : 'RECORD'}
-        </Text>
-      </TouchableOpacity>
+      <Text style={[styles.hint, { color: theme.muted }]}>
+        Point phone at wind and slowly pan left and right to capture peak signal
+      </Text>
 
 
     </ScrollView>
