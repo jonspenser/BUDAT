@@ -32,9 +32,9 @@ export const DAY_THEME: Theme = {
 
 /**
  * Hawaii is UTC-10 (no DST).
- * Sunrise ≈ 06:00, sunset ≈ 18:30.
+ * Sunrise ≈ 06:00, sunset ≈ 19:00 HST.
  */
 export function getTheme(): Theme {
   const hiHour = ((Date.now() / 3_600_000) - 10 + 240) % 24;
-  return hiHour >= 6.0 && hiHour < 18.5 ? DAY_THEME : NIGHT_THEME;
+  return hiHour >= 6.0 && hiHour < 19.0 ? DAY_THEME : NIGHT_THEME;
 }

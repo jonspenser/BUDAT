@@ -11,24 +11,37 @@ export interface SwellRecord {
   id: string;
   stationId: string;
   stationName: string;
-  timestamp: string;       // ISO string
+  timestamp: string;       // ISO string — when the session was (may differ from reading)
   heightFt: number;
   category: SwellCategory;
   period: number;          // seconds
   directionDeg: number;
   directionLabel: string;  // cardinal
   speedMph: number;
-  // Wind snapshot (from local port station at time of log)
   windKt?: number | null;
   windGustKt?: number | null;
   windDirDeg?: number | null;
   windDirLabel?: string | null;
-  // Tide snapshot
   tideHeightFt?: number | null;
-  tideLabel?: string | null;   // e.g. "rising" / "falling"
+  tideLabel?: string | null;
+  moonPhase?: string;       // e.g. "WAXING GIBBOUS"
+  spot?: string;            // surf/dive/fishing spot name
   photoUri?: string;
   audioUri?: string;
   note?: string;
+}
+
+// ── Moon phase ────────────────────────────────────────────────────────────────
+
+export function getMoonPhase(date: Date): string {
+  const knownNewMoon = new Date('2000-01-06T18:14:00Z').getTime();
+  const synodicMonth = 29.530588853;
+  const elapsed = (date.getTime() - knownNewMoon) / 86_400_000;
+  const phase = ((elapsed % synodicMonth) + synodicMonth) % synodicMonth;
+  if (phase < 1.85 || phase >= 28.0) return 'NEW';
+  if (phase >= 14.0 && phase < 16.61) return 'FULL';
+  const illumination = (1 - Math.cos(2 * Math.PI * phase / synodicMonth)) / 2;
+  return `${Math.round(illumination * 100)}%`;
 }
 
 // ── Categorize height (meters → category) ────────────────────────────────────
@@ -72,6 +85,7 @@ export function buildSwellRecord(
     directionDeg,
     directionLabel,
     speedMph: Math.round(speedMph * 10) / 10,
+    moonPhase: getMoonPhase(reading.timestamp),
     ...overrides,
   };
 }

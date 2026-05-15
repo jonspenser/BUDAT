@@ -3,6 +3,18 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NEARSHORE_STATIONS, NearshoreStation } from '../constants/buoys';
 
 const STORAGE_KEY = '@budat/buoy_list';
+const STATION_ID_MIGRATIONS: Record<string, string> = {
+  '51101': '51001',
+};
+
+function migrateStationIds(ids: string[]): string[] {
+  const next: string[] = [];
+  ids.forEach(id => {
+    const migrated = STATION_ID_MIGRATIONS[id] ?? id;
+    if (!next.includes(migrated)) next.push(migrated);
+  });
+  return next;
+}
 
 export function useBuoyList() {
   const [activeIds, setActiveIds] = useState<string[]>(NEARSHORE_STATIONS.map(s => s.id));
@@ -12,10 +24,13 @@ export function useBuoyList() {
     AsyncStorage.getItem(STORAGE_KEY).then(val => {
       if (val) {
         try {
-          const ids: string[] = JSON.parse(val);
+          const ids: string[] = migrateStationIds(JSON.parse(val));
           // Filter to only valid station IDs
           const valid = ids.filter(id => NEARSHORE_STATIONS.some(s => s.id === id));
-          if (valid.length > 0) setActiveIds(valid);
+          if (valid.length > 0) {
+            setActiveIds(valid);
+            AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(valid)).catch(() => {});
+          }
         } catch {}
       }
       setLoaded(true);

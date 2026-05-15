@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, ScrollView, Image } from 'react-native';
-import Svg, { G, Polygon, Circle, Text as SvgText } from 'react-native-svg';
+import Svg, { G, Polygon, Circle, Path, Rect, Ellipse, Text as SvgText } from 'react-native-svg';
 import { MAP_BOUNDS, NearshoreStation } from '../constants/buoys';
 import { BuoyReading } from '../hooks/useBuoyData';
 import { formatHeight, formatPeriod, formatHawaiiTime, isOffline } from '../constants/formatters';
@@ -87,7 +87,7 @@ export default function HawaiiMap({ width, height, nearshoreStations, nearshoreD
               const hStr = offline ? 'OFFLINE' : formatHeight(d!.SwH ?? d!.WVHT);
               const pStr = offline ? '' : formatPeriod(d!.SwP ?? d!.DPD);
               const ts   = offline ? '' : formatHawaiiTime(d!.timestamp);
-              const dir = offline ? null : (d?.MWD ?? null);
+              const dir = offline ? null : (d?.SwD ?? d?.MWD ?? null);
               const travelDeg = dir !== null ? (dir + 180) % 360 : null;
               const dirLabel = dir !== null ? `${Math.round(dir)}°` : '';
 
@@ -159,7 +159,7 @@ export default function HawaiiMap({ width, height, nearshoreStations, nearshoreD
                   {travelDeg !== null && (
                     <Polygon points={arrowPoints(x + (station.arrowOffsetX ?? 0), arrowCY, arrowLen, arrowWid, travelDeg)} fill={theme.accent} />
                   )}
-                  <Circle cx={x} cy={y} r={1.5} fill={theme.accent} />
+                  <Circle cx={x} cy={y} r={2.55} fill={theme.accent} />
                   <SvgText x={labelX} y={nameY} fontSize={fName} fontFamily="Courier" fontWeight="bold" fill={theme.accent} textAnchor={labelAnchor as 'middle'}>
                     {station.name}
                   </SvgText>

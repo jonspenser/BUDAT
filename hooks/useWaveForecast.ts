@@ -13,39 +13,41 @@ interface ForecastSample {
 }
 
 const BASE = 'https://pae-paha.pacioos.hawaii.edu/erddap/griddap/ww3_hawaii_lon180.json';
+const INFO = 'https://pae-paha.pacioos.hawaii.edu/erddap/info/ww3_hawaii_lon180/index.json';
 
-/** Fetch a single WW3 variable over a date range, return Map<isoTimeStr, value> */
-async function fetchVar(
-  variable: 'Thgt' | 'Tper' | 'Tdir',
-  startISO: string,
-  endISO: string,
-  gLat: string,
-  gLon: string,
-): Promise<Map<string, number>> {
-  // ERDDAP griddap URL: raw brackets, NOT percent-encoded
-  const url = `${BASE}?${variable}[(${startISO}):(${endISO})][0][(${gLat})][(${gLon})]`;
-  console.log('[WaveForecast] fetching', variable, url);
+const FORECAST_VARS = ['Thgt', 'Tper', 'Tdir'] as const;
+type ForecastVar = typeof FORECAST_VARS[number];
 
-  const res = await fetch(url);
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`HTTP ${res.status} (${variable}): ${body.slice(0, 200)}`);
-  }
+function forecastUrl(variable: ForecastVar, dims: string): string {
+  return `${BASE}?${encodeURIComponent(`${variable}${dims}`)}#`;
+}
+
+function isoZ(d: Date): string {
+  return d.toISOString().slice(0, 19) + 'Z';
+}
+
+function startOfTodayHstUtc(now = new Date()): Date {
+  const hst = new Date(now.getTime() - 10 * 3600_000);
+  return new Date(Date.UTC(
+    hst.getUTCFullYear(),
+    hst.getUTCMonth(),
+    hst.getUTCDate(),
+    10,
+    0,
+    0,
+  ));
+}
+
+async function getCoverageEnd(): Promise<Date> {
+  const res = await fetch(INFO);
+  if (!res.ok) throw new Error(`HTTP ${res.status}: WW3 metadata unavailable`);
 
   const json = await res.json();
-  if (json.error) throw new Error(json.error.message ?? 'ERDDAP error');
-
-  const { columnNames, rows } = json.table;
-  const ti = columnNames.indexOf('time');
-  const vi = columnNames.indexOf(variable);
-
-  const map = new Map<string, number>();
-  for (const r of rows) {
-    const t = String(r[ti]);
-    const v = parseFloat(r[vi]);
-    if (!isNaN(v)) map.set(t, v);
-  }
-  return map;
+  const row = json.table.rows.find((r: any[]) =>
+    r[0] === 'attribute' && r[1] === 'NC_GLOBAL' && r[2] === 'time_coverage_end'
+  );
+  if (!row?.[4]) throw new Error('WW3 metadata missing time coverage');
+  return new Date(row[4]);
 }
 
 export function useWaveForecast(lat: number, lon: number) {
@@ -60,35 +62,55 @@ export function useWaveForecast(lat: number, lon: number) {
       setLoading(true);
       setError(null);
       try {
-        // Snap lat/lon to nearest 0.05° grid
         const gLat = (Math.round(lat / 0.05) * 0.05).toFixed(2);
         const gLon = (Math.round(lon / 0.05) * 0.05).toFixed(2);
 
-        // 5-day window from now (WW3 Hawaii model typically has ~5 days ahead)
         const now = new Date();
-        const startISO = now.toISOString().replace(/\.\d{3}Z$/, 'Z');
-        const end = new Date(now.getTime() + 5 * 24 * 3600_000);
-        const endISO = end.toISOString().replace(/\.\d{3}Z$/, 'Z');
+        const start = startOfTodayHstUtc(now);
+        const coverageEnd = await getCoverageEnd();
+        const end = new Date(Math.min(
+          coverageEnd.getTime(),
+          now.getTime() + 5 * 24 * 3600_000,
+        ));
+        if (end <= start) throw new Error('WW3 forecast unavailable');
 
-        const [htMap, perMap, dirMap] = await Promise.all([
-          fetchVar('Thgt', startISO, endISO, gLat, gLon),
-          fetchVar('Tper', startISO, endISO, gLat, gLon),
-          fetchVar('Tdir', startISO, endISO, gLat, gLon),
-        ]);
+        const dims = `[(${isoZ(start)}):(${isoZ(end)})][0][(${gLat})][(${gLon})]`;
+        const tables: ForecastSample[][] = await Promise.all(FORECAST_VARS.map(async variable => {
+          const url = forecastUrl(variable, dims);
+          console.log('[WaveForecast] URL:', url);
 
-        // Merge on time key; use height as the primary timeline
-        const pts: WaveForecastPoint[] = [];
-        for (const [t, heightM] of htMap) {
-          if (heightM <= 0) continue;
-          pts.push({
-            time:         new Date(t),
-            heightM,
-            period:       perMap.get(t) ?? 0,
-            directionDeg: dirMap.get(t) ?? 0,
-          });
-        }
+          const res = await fetch(url);
+          if (!res.ok) {
+            const body = await res.text().catch(() => '');
+            throw new Error(`HTTP ${res.status} (${variable}): ${body.slice(0, 200)}`);
+          }
 
-        // Sort chronologically
+          const json = await res.json();
+          if (json.error) throw new Error(json.error.message ?? 'ERDDAP error');
+
+          const { columnNames, rows } = json.table;
+          const ti = columnNames.indexOf('time');
+          const vi = columnNames.indexOf(variable);
+
+          return rows.map((r: any[]) => ({
+            time: String(r[ti]),
+            value: parseFloat(r[vi]),
+          }));
+        }));
+
+        const heights = tables[0];
+        const periodsByTime = new Map(tables[1].map(p => [p.time, p.value]));
+        const directionsByTime = new Map(tables[2].map(p => [p.time, p.value]));
+
+        const pts: WaveForecastPoint[] = heights
+          .filter(p => !isNaN(p.value))
+          .map(p => ({
+            time:         new Date(p.time),
+            heightM:      p.value,
+            period:       periodsByTime.get(p.time) ?? 0,
+            directionDeg: directionsByTime.get(p.time) ?? 0,
+          }));
+
         pts.sort((a, b) => a.time.getTime() - b.time.getTime());
 
         if (!cancelled) setForecast(pts);

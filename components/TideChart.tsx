@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { View, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import Svg, { Path, Circle, Text as SvgText } from 'react-native-svg';
 import { TidePrediction } from '../hooks/useTideData';
 import { Theme } from '../constants/colors';
@@ -15,7 +15,7 @@ interface Props {
 const PAD_LEFT = 36;
 const PAD_RIGHT = 8;
 const PAD_TOP = 36;
-const PAD_BOT = 24;
+const PAD_BOT = 36;
 
 function hourToLabel(h: number): string {
   const h24 = h % 24;
@@ -45,18 +45,29 @@ export default function TideChart({ predictions, width, height, theme, dayOffset
     const empty = { path: '', yLabels: [], xTicks: [], hiloMarkers: [] as HiloMarker[], now: null, nowY: null, nowHeight: null, nowLabel: '' };
     if (predictions.length < 2) return empty;
 
-    const todayDate = predictions[0].time.split(' ')[0];
+    // Target date based on dayOffset (local time)
+    const targetD = new Date();
+    targetD.setDate(targetD.getDate() + dayOffset);
+    const targetDate = `${targetD.getFullYear()}-${String(targetD.getMonth()+1).padStart(2,'0')}-${String(targetD.getDate()).padStart(2,'0')}`;
+
+    // Map any prediction time → hours relative to target day midnight.
+    // Yesterday's predictions → negative hours, tomorrow's → 24+.
     const toHours = (timeStr: string): number => {
       const [date, time] = timeStr.split(' ');
       if (!time) return 0;
       const [h, m] = time.split(':').map(Number);
-      return h + m / 60 + (date !== todayDate ? 24 : 0);
+      const baseH = h + m / 60;
+      if (date === targetDate) return baseH;
+      const predMs = new Date(date).getTime();
+      const tgtMs  = new Date(targetDate).getTime();
+      const diffDays = Math.round((predMs - tgtMs) / 86400000);
+      return baseH + diffDays * 24;
     };
 
     const allHours = predictions.map(p => toHours(p.time));
     const allHeights = predictions.map(p => p.height);
 
-    // Fixed 24-hour window: today midnight → tomorrow midnight (local time)
+    // Fixed 24-hour window: target day midnight → next midnight
     const WIN_START = 0;
     const WIN_END = 24;
 
@@ -161,6 +172,9 @@ export default function TideChart({ predictions, width, height, theme, dayOffset
 
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
+      <Text style={[styles.dayLabel, { color: dayOffset === 0 ? theme.accent : theme.muted }]}>
+        {dayOffsetLabel(dayOffset)}
+      </Text>
       <Svg width={width} height={CHART_HEIGHT}>
 
         {/* Y-axis labels */}
@@ -198,9 +212,10 @@ export default function TideChart({ predictions, width, height, theme, dayOffset
           const cx = PAD_LEFT + m.x;
           const cy = PAD_TOP + m.y;
           const isHigh = m.type === 'H';
-          // Labels above curve for highs, below for lows
-          const labelY = isHigh ? cy - 8 : cy + 18;
-          const htLabelY = isHigh ? cy - 18 : cy + 28;
+          // Clamp low labels up if they'd overlap the x-axis
+          const nearBottom = cy + 30 > CHART_HEIGHT - PAD_BOT;
+          const labelY = (isHigh || nearBottom) ? cy - 10 : cy + 18;
+          const htLabelY = (isHigh || nearBottom) ? cy - 20 : cy + 28;
           return (
             <React.Fragment key={i}>
 <SvgText x={cx} y={htLabelY} fontSize={9} fontFamily="Courier" fill={theme.accent} textAnchor="middle" fontWeight="700">
@@ -224,19 +239,6 @@ export default function TideChart({ predictions, width, height, theme, dayOffset
           />
         ) : null}
 
-        {/* Day label (top-right) */}
-        <SvgText
-          x={PAD_LEFT + chartW}
-          y={PAD_TOP - 8}
-          fontSize={9}
-          fontFamily="Courier"
-          fill={dayOffset === 0 ? theme.accent : theme.muted}
-          textAnchor="end"
-          fontWeight="700"
-        >
-          {dayOffsetLabel(dayOffset)}
-        </SvgText>
-
         {/* Current time dot — today only */}
         {dayOffset === 0 && now !== null && nowY !== null && nowHeight !== null &&
           now >= 0 && now <= chartW && (
@@ -256,5 +258,14 @@ export default function TideChart({ predictions, width, height, theme, dayOffset
 const styles = StyleSheet.create({
   container: {
     width: '100%',
+  },
+  dayLabel: {
+    position: 'absolute',
+    top: 4,
+    right: PAD_RIGHT + 4,
+    fontFamily: 'Courier',
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 1,
   },
 });

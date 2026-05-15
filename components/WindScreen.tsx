@@ -10,20 +10,14 @@ import {
 import { NEARSHORE_STATIONS } from '../constants/buoys';
 import { Theme } from '../constants/colors';
 import { WindReading } from '../hooks/useWindData';
-import { formatHawaiiTime } from '../constants/formatters';
+import { formatHawaiiTime, getCardinalDirection } from '../constants/formatters';
 
 const { width: SCREEN_W } = Dimensions.get('window');
-
-function cardinalFromDeg(deg: number | null): string {
-  if (deg === null) return '--';
-  const dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
-  return dirs[Math.round(deg / 22.5) % 16];
-}
 
 /** m/s → knots, formatted as "X.Xkts" */
 function formatKnots(ms: number | null): string {
   if (ms === null) return '--';
-  return `${(ms * 1.944).toFixed(1)}kts`;
+  return `${(ms * 1.94384).toFixed(1)}kts`;
 }
 
 interface WindScreenProps {
@@ -73,7 +67,7 @@ export default function WindScreen({ windData, height, refreshing, onRefresh, th
                     <Text style={[styles.dataLabel, { color: theme.muted }]}>FROM</Text>
                     <Text style={[styles.dataValue, { color: theme.textPrimary }]}>
                       {wdir !== null
-                        ? `${cardinalFromDeg(wdir)}  ${Math.round(wdir)}°`
+                        ? `${getCardinalDirection(wdir) ?? '--'}  ${Math.round(wdir)}°`
                         : '--'}
                     </Text>
                   </View>

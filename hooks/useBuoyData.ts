@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // All fields recovered from Hermes bytecode disassembly of original app
 export interface BuoyReading {
@@ -21,6 +22,15 @@ export interface BuoyReading {
   ATMP: number | null;  // Air temp (°C)
   WTMP: number | null;  // Water temp (°C)
   PRES: number | null;  // Pressure (hPa)
+}
+
+// Serialized form for AsyncStorage (Date stored as ISO string)
+interface BuoyReadingCached extends Omit<BuoyReading, 'timestamp'> {
+  timestamp: string;
+}
+
+function deserializeRows(raw: BuoyReadingCached[]): BuoyReading[] {
+  return raw.map(r => ({ ...r, timestamp: new Date(r.timestamp) }));
 }
 
 function parseMissing(val: number): number | null {
@@ -91,13 +101,22 @@ function parseNOAAStandardData(text: string, stationId: string): BuoyReading[] {
   return results;
 }
 
-// Parse spectral summary .spec file — returns Map keyed by timestamp string
-function parseNOAASpecData(text: string): Map<string, { SwH: number | null; SwP: number | null; WWH: number | null; MWD: number | null }> {
+interface SpecRow {
+  ts: Date;
+  SwH: number | null;
+  SwP: number | null;
+  SwD: number | null;
+  WWH: number | null;
+  MWD: number | null;
+}
+
+// Parse spectral summary .spec file — returns time-sorted rows (newest first)
+function parseNOAASpecData(text: string): SpecRow[] {
   const lines = text.trim().split('\n');
-  const result = new Map<string, { SwH: number | null; SwP: number | null; WWH: number | null; MWD: number | null }>();
-  if (lines.length < 3) return result;
+  if (lines.length < 3) return [];
 
   const headers = lines[0].replace('#', '').trim().split(/\s+/);
+  const rows: SpecRow[] = [];
   const limit = Math.min(lines.length, 150);
 
   for (let i = 2; i < limit; i++) {
@@ -109,7 +128,11 @@ function parseNOAASpecData(text: string): Map<string, { SwH: number | null; SwP:
 
     if (!obj['YY'] || !obj['MM'] || !obj['DD'] || !obj['hh'] || !obj['mm']) continue;
 
-    const key = rowKey(obj['YY'], obj['MM'], obj['DD'], obj['hh'], obj['mm']);
+    const ts = new Date(
+      `${obj['YY']}-${obj['MM'].padStart(2,'0')}-${obj['DD'].padStart(2,'0')}` +
+      `T${obj['hh'].padStart(2,'0')}:${obj['mm'].padStart(2,'0')}:00Z`
+    );
+    if (isNaN(ts.getTime())) continue;
 
     const get = (k: string): number | null => {
       const v = obj[k];
@@ -118,28 +141,40 @@ function parseNOAASpecData(text: string): Map<string, { SwH: number | null; SwP:
       return parseMissing(n);
     };
 
-    result.set(key, {
-      SwH: get('SwH'),
-      SwP: get('SwP'),
-      WWH: get('WWH'),
-      MWD: get('MWD'),
-    });
+    rows.push({ ts, SwH: get('SwH'), SwP: get('SwP'), SwD: get('SwD'), WWH: get('WWH'), MWD: get('MWD') });
   }
 
-  return result;
+  return rows;
 }
 
-function specKey(ts: Date): string {
-  const YY = String(ts.getUTCFullYear()); // match 4-digit year used in NDBC files
-  const MM = String(ts.getUTCMonth() + 1).padStart(2, '0');
-  const DD = String(ts.getUTCDate()).padStart(2, '0');
-  const hh = String(ts.getUTCHours()).padStart(2, '0');
-  const mm = String(ts.getUTCMinutes()).padStart(2, '0');
-  return `${YY}-${MM}-${DD}-${hh}-${mm}`;
+// Find the closest spec row within a 30-minute window
+const SPEC_TOLERANCE_MS = 30 * 60 * 1000;
+function closestSpecRow(rows: SpecRow[], target: Date): SpecRow | null {
+  let best: SpecRow | null = null;
+  let bestDiff = SPEC_TOLERANCE_MS + 1;
+  for (const row of rows) {
+    const diff = Math.abs(row.ts.getTime() - target.getTime());
+    if (diff < bestDiff) { best = row; bestDiff = diff; }
+  }
+  return bestDiff <= SPEC_TOLERANCE_MS ? best : null;
 }
 
 const NDBC_BASE = 'https://www.ndbc.noaa.gov/data/realtime2/';
 const REFRESH_MS = 5 * 60 * 1000;
+const cacheKey = (id: string) => `@budat/buoy_cache/v2/${id}`;
+
+function hasWaveData(row: BuoyReading): boolean {
+  return row.SwH !== null || row.WVHT !== null || row.SwP !== null || row.DPD !== null || row.MWD !== null;
+}
+
+function latestWaveReading(rows: BuoyReading[]): BuoyReading | null {
+  return rows.find(hasWaveData) ?? rows[0] ?? null;
+}
+
+function displayWaveRows(rows: BuoyReading[]): BuoyReading[] {
+  const waveRows = rows.filter(hasWaveData);
+  return waveRows.length > 0 ? waveRows : rows;
+}
 
 export async function fetchBuoyRows(stationId: string): Promise<BuoyReading[]> {
   const [txtRes, specRes] = await Promise.all([
@@ -152,16 +187,16 @@ export async function fetchBuoyRows(stationId: string): Promise<BuoyReading[]> {
   const rows = parseNOAAStandardData(txtText, stationId);
   if (rows.length === 0) throw new Error('Parse error');
 
-  // Merge spec data if available
+  // Merge spec data if available — use closest-match within 30 min
   if (specRes?.ok) {
     const specText = await specRes.text();
-    const specMap = parseNOAASpecData(specText);
+    const specRows = parseNOAASpecData(specText);
     for (const row of rows) {
-      const key = specKey(row.timestamp);
-      const spec = specMap.get(key);
+      const spec = closestSpecRow(specRows, row.timestamp);
       if (spec) {
         row.SwH  = spec.SwH;
         row.SwP  = spec.SwP;
+        row.SwD  = spec.SwD;
         row.WWH  = spec.WWH;
         if (spec.MWD !== null) row.MWD = spec.MWD;
       }
@@ -171,21 +206,57 @@ export async function fetchBuoyRows(stationId: string): Promise<BuoyReading[]> {
   return rows;
 }
 
+async function loadCachedRows(stationId: string): Promise<BuoyReading[] | null> {
+  try {
+    const raw = await AsyncStorage.getItem(cacheKey(stationId));
+    if (!raw) return null;
+    const parsed: BuoyReadingCached[] = JSON.parse(raw);
+    return deserializeRows(parsed);
+  } catch {
+    return null;
+  }
+}
+
+async function saveCachedRows(stationId: string, rows: BuoyReading[]): Promise<void> {
+  try {
+    const serialized: BuoyReadingCached[] = rows.map(r => ({
+      ...r,
+      timestamp: r.timestamp.toISOString(),
+    }));
+    await AsyncStorage.setItem(cacheKey(stationId), JSON.stringify(serialized));
+  } catch {}
+}
+
 export function useBuoyData(stationId: string) {
-  const [data, setData]       = useState<BuoyReading | null>(null);
-  const [history, setHistory] = useState<BuoyReading[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError]     = useState<string | null>(null);
+  const [data, setData]           = useState<BuoyReading | null>(null);
+  const [history, setHistory]     = useState<BuoyReading[]>([]);
+  const [loading, setLoading]     = useState(true);
+  const [error, setError]         = useState<string | null>(null);
+  const [fromCache, setFromCache] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const rows = await fetchBuoyRows(stationId);
-      setData(rows[0]);
-      setHistory(rows);
+      const displayRows = displayWaveRows(rows);
+      setData(latestWaveReading(displayRows));
+      setHistory(displayRows);
+      setFromCache(false);
+      await saveCachedRows(stationId, displayRows);
     } catch (e: any) {
-      setError(e.message ?? 'Fetch error');
+      // Network failure — try to serve from cache
+      const cached = await loadCachedRows(stationId);
+      if (cached && cached.length > 0) {
+        const displayRows = displayWaveRows(cached);
+        setData(latestWaveReading(displayRows));
+        setHistory(displayRows);
+        setFromCache(true);
+        setError(null);
+      } else {
+        setError(e.message ?? 'Fetch error');
+        setFromCache(false);
+      }
     } finally {
       setLoading(false);
     }
@@ -201,9 +272,28 @@ export function useBuoyData(stationId: string) {
       setError(null);
       try {
         const rows = await fetchBuoyRows(stationId);
-        if (!cancelled) { setData(rows[0]); setHistory(rows); }
+        const displayRows = displayWaveRows(rows);
+        if (!cancelled) {
+          setData(latestWaveReading(displayRows));
+          setHistory(displayRows);
+          setFromCache(false);
+          await saveCachedRows(stationId, displayRows);
+        }
       } catch (e: any) {
-        if (!cancelled) setError(e.message ?? 'Fetch error');
+        if (!cancelled) {
+          // Network failure — try cache
+          const cached = await loadCachedRows(stationId);
+          if (cached && cached.length > 0) {
+            const displayRows = displayWaveRows(cached);
+            setData(latestWaveReading(displayRows));
+            setHistory(displayRows);
+            setFromCache(true);
+            setError(null);
+          } else {
+            setError(e.message ?? 'Fetch error');
+            setFromCache(false);
+          }
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -214,5 +304,5 @@ export function useBuoyData(stationId: string) {
     return () => { cancelled = true; clearTimeout(timer); };
   }, [stationId]);
 
-  return { data, history, loading, error, refetch: fetchData };
+  return { data, history, loading, error, fromCache, refetch: fetchData };
 }

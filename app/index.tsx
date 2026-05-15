@@ -14,25 +14,29 @@ import {
   Modal,
   TouchableOpacity,
   TouchableWithoutFeedback,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import Svg, { Polygon, Circle, Path } from 'react-native-svg';
 import { NEARSHORE_STATIONS } from '../constants/buoys';
 import { isOffline, getCardinalDirection } from '../constants/formatters';
 import { HAWAII_STATIONS } from '../constants/hawaiiStations';
 import { useBuoyData, BuoyReading } from '../hooks/useBuoyData';
+import { useHistoricalBuoyData } from '../hooks/useHistoricalBuoyData';
 import { useTideData } from '../hooks/useTideData';
 import { useWindData } from '../hooks/useWindData';
 import { useTheme } from '../hooks/useTheme';
 import { useSelectedStation } from '../hooks/useSelectedStation';
 import { useBuoyList } from '../hooks/useBuoyList';
-import { useAlertSettings } from '../hooks/useAlertSettings';
-import { useNewSwellAlert } from '../hooks/useNewSwellAlert';
 import { useSwellLogContext } from '../contexts/SwellLogContext';
+import { getMoonPhase } from '../hooks/useSwellLog';
 import HawaiiMap from '../components/HawaiiMap';
 import TideChart from '../components/TideChart';
 import DataScreen from '../components/DataScreen';
 import { LogbookPage } from './logbook';
 import { ForecastPage } from './forecast';
+import { SchoolPage } from './school';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 const TIDE_H = Math.floor(SCREEN_H * 0.38);
@@ -468,7 +472,7 @@ function BuoyGrid({ nearshoreData, theme, onBuoyPress }: BuoyGridProps) {
   );
 }
 
-const SCREEN_LABELS = ['MAP', 'DATA', 'FORECAST', 'LOG'] as const;
+const SCREEN_LABELS = ['MAP', 'DATA', 'FORECAST', 'SCHOOL', 'LOGBOOK'] as const;
 
 // Hawaii winter = Nov–Apr (north swells dominate)
 function isHawaiiWinter(): boolean {
@@ -486,10 +490,260 @@ const STATION_BUOY_MAP: Record<string, string> = {
 
 function getSnapshotBuoyId(stationId: string): string {
   if (stationId === 'honolulu') {
-    return isHawaiiWinter() ? '51201' : '51205'; // Waimea Bay (winter) / Barbers Pt (summer)
+    return isHawaiiWinter() ? '51201' : '51205';
   }
   return STATION_BUOY_MAP[stationId] ?? '51208';
 }
+
+// ── Log Session helpers ───────────────────────────────────────────────────────
+
+const HST_MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+const HST_DAYS   = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+
+function hstParts(d: Date) {
+  const hst = new Date(d.getTime() - 10 * 3600_000);
+  return {
+    year: hst.getUTCFullYear(), month: hst.getUTCMonth(),
+    day: hst.getUTCDate(), hour: hst.getUTCHours(), dow: hst.getUTCDay(),
+  };
+}
+
+function fmtHSTDate(d: Date): string {
+  const { dow, month, day } = hstParts(d);
+  return `${HST_DAYS[dow]}  ${HST_MONTHS[month]} ${day}`;
+}
+
+function fmtHSTTime(d: Date): string {
+  const { hour } = hstParts(d);
+  const isPm = hour >= 12;
+  const h = hour % 12 || 12;
+  return `${h}:00 ${isPm ? 'PM' : 'AM'}  HST`;
+}
+
+function isToday(d: Date): boolean {
+  const { year: y1, month: m1, day: d1 } = hstParts(d);
+  const { year: y2, month: m2, day: d2 } = hstParts(new Date());
+  return y1 === y2 && m1 === m2 && d1 === d2;
+}
+
+// ── Log Session modal component ───────────────────────────────────────────────
+
+interface LogSessionModalProps {
+  visible: boolean;
+  mode: 'now' | 'past';
+  date: Date;
+  theme: any;
+  spot: string;
+  onSpotChange: (s: string) => void;
+  onModeChange: (m: 'now' | 'past') => void;
+  onAdjust: (delta: number, unit: 'day' | 'hour') => void;
+  onSave: () => void;
+  onCancel: () => void;
+}
+
+function LogSessionModal({ visible, mode, date, theme, spot, onSpotChange, onModeChange, onAdjust, onSave, onCancel }: LogSessionModalProps) {
+  const moonPhase = getMoonPhase(date);
+  const atNow = Date.now() - date.getTime() < 3 * 60_000; // within 3 min = "now"
+  const bg = theme.background;
+  const ac = theme.accent;
+  const mu = theme.muted;
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
+      <TouchableWithoutFeedback onPress={onCancel}>
+        <View style={lsm.overlay}>
+          <TouchableWithoutFeedback>
+            <View style={[lsm.box, { backgroundColor: bg, borderColor: ac }]}>
+              <Text style={[lsm.title, { color: ac }]}>LOG SESSION</Text>
+
+              {/* NOW / PAST toggle */}
+              <View style={lsm.toggle}>
+                {(['now', 'past'] as const).map(m => (
+                  <TouchableOpacity
+                    key={m}
+                    onPress={() => onModeChange(m)}
+                    style={[lsm.toggleBtn, mode === m && { borderColor: ac }]}
+                  >
+                    <Text style={[lsm.toggleText, { color: mode === m ? ac : mu }]}>
+                      {m === 'now' ? 'NOW' : 'PAST'}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {/* Date / time picker (past mode) */}
+              {mode === 'past' && (
+                <View style={lsm.pickerSection}>
+                  <View style={lsm.pickerRow}>
+                    <TouchableOpacity onPress={() => onAdjust(-1, 'day')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                      <Text style={[lsm.pickerArrow, { color: ac }]}>‹</Text>
+                    </TouchableOpacity>
+                    <Text style={[lsm.pickerVal, { color: theme.textPrimary }]}>{fmtHSTDate(date)}</Text>
+                    <TouchableOpacity
+                      onPress={() => onAdjust(1, 'day')}
+                      disabled={isToday(date)}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
+                      <Text style={[lsm.pickerArrow, { color: ac, opacity: isToday(date) ? 0.25 : 1 }]}>›</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <View style={lsm.pickerRow}>
+                    <TouchableOpacity onPress={() => onAdjust(-1, 'hour')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                      <Text style={[lsm.pickerArrow, { color: ac }]}>‹</Text>
+                    </TouchableOpacity>
+                    <Text style={[lsm.pickerVal, { color: theme.textPrimary }]}>{fmtHSTTime(date)}</Text>
+                    <TouchableOpacity
+                      onPress={() => onAdjust(1, 'hour')}
+                      disabled={atNow}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
+                      <Text style={[lsm.pickerArrow, { color: ac, opacity: atNow ? 0.25 : 1 }]}>›</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+
+              {/* Spot field */}
+              <Text style={[lsm.spotLabel, { color: ac }]}>WHERE?</Text>
+              <View style={lsm.spotRow}>
+                <TextInput
+                  value={spot}
+                  onChangeText={onSpotChange}
+                  placeholder="spot / location"
+                  placeholderTextColor={mu}
+                  style={[lsm.spotInput, { color: theme.textPrimary, borderBottomColor: ac }]}
+                  returnKeyType="done"
+                  autoCorrect={false}
+                  autoCapitalize="words"
+                  autoFocus
+                />
+              </View>
+
+              {/* Moon phase */}
+              <View style={lsm.moonRow}>
+                <Text style={[lsm.moonLabel, { color: mu }]}>MOON</Text>
+                <Text style={[lsm.moonVal, { color: theme.textPrimary }]}>{moonPhase}</Text>
+              </View>
+
+              {/* Actions */}
+              <View style={lsm.actions}>
+                <TouchableOpacity onPress={onCancel} style={lsm.actionBtn}>
+                  <Text style={[lsm.actionText, { color: mu }]}>CANCEL</Text>
+                </TouchableOpacity>
+                <View style={[lsm.actionDivider, { backgroundColor: theme.accentDim }]} />
+                <TouchableOpacity onPress={onSave} style={lsm.actionBtn}>
+                  <Text style={[lsm.actionText, { color: ac }]}>SAVE</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </TouchableWithoutFeedback>
+        </View>
+      </TouchableWithoutFeedback>
+    </Modal>
+  );
+}
+
+const lsm = StyleSheet.create({
+  overlay:      { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', alignItems: 'center', justifyContent: 'center' },
+  box:          { width: 290, borderWidth: 1, borderRadius: 6, paddingTop: 20, paddingBottom: 0, overflow: 'hidden' },
+  title:        { fontFamily: 'Courier', fontWeight: '900', fontSize: 14, letterSpacing: 4, textAlign: 'center', marginBottom: 18 },
+  toggle:       { flexDirection: 'row', justifyContent: 'center', gap: 10, marginBottom: 16 },
+  toggleBtn:    { borderWidth: 1, borderColor: 'transparent', borderRadius: 4, paddingHorizontal: 20, paddingVertical: 6 },
+  toggleText:   { fontFamily: 'Courier', fontWeight: '700', fontSize: 11, letterSpacing: 2 },
+  pickerSection:{ marginHorizontal: 20, marginBottom: 14, gap: 8 },
+  pickerRow:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  pickerArrow:  { fontFamily: 'Courier', fontSize: 22, fontWeight: '300', paddingHorizontal: 8 },
+  pickerVal:    { fontFamily: 'Courier', fontSize: 12, letterSpacing: 1, flex: 1, textAlign: 'center' },
+  spotLabel:    { fontFamily: 'Courier', fontWeight: '900', fontSize: 16, letterSpacing: 4, textAlign: 'center', marginBottom: 8 },
+  spotRow:      { marginHorizontal: 20, marginBottom: 16 },
+  spotInput:    { fontFamily: 'Courier', fontSize: 13, letterSpacing: 0.5, borderBottomWidth: 1.5, paddingVertical: 6, textAlign: 'center' },
+  moonRow:      { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'center', gap: 8, marginBottom: 20, paddingHorizontal: 20 },
+  moonLabel:    { fontFamily: 'Courier', fontSize: 9, letterSpacing: 2 },
+  moonVal:      { fontFamily: 'Courier', fontSize: 11, letterSpacing: 1 },
+  actions:      { flexDirection: 'row', borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)' },
+  actionBtn:    { flex: 1, paddingVertical: 14, alignItems: 'center' },
+  actionDivider:{ width: 1 },
+  actionText:   { fontFamily: 'Courier', fontWeight: '700', fontSize: 11, letterSpacing: 2 },
+});
+
+// ── Overlay picker modal ──────────────────────────────────────────────────────
+
+interface OverlayPickerModalProps {
+  visible: boolean;
+  date: Date;
+  onAdjust: (delta: number, unit: 'day' | 'hour') => void;
+  onConfirm: () => void;
+  onClear: () => void;
+  onCancel: () => void;
+  theme: any;
+}
+
+function OverlayPickerModal({ visible, date, onAdjust, onConfirm, onClear, onCancel, theme }: OverlayPickerModalProps) {
+  const ac = theme.accent;
+  const mu = theme.muted;
+  const bg = theme.background;
+  const atNow = Date.now() - date.getTime() < 3 * 60_000;
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
+      <TouchableWithoutFeedback onPress={onCancel}>
+        <View style={opm.overlay}>
+          <TouchableWithoutFeedback>
+            <View style={[opm.box, { backgroundColor: bg, borderColor: ac }]}>
+              <Text style={[opm.title, { color: ac }]}>COMPARE DATE</Text>
+              <View style={opm.pickerSection}>
+                <View style={opm.pickerRow}>
+                  <TouchableOpacity onPress={() => onAdjust(-1, 'day')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                    <Text style={[opm.arrow, { color: ac }]}>‹</Text>
+                  </TouchableOpacity>
+                  <Text style={[opm.val, { color: theme.textPrimary }]}>{fmtHSTDate(date)}</Text>
+                  <TouchableOpacity onPress={() => onAdjust(1, 'day')} disabled={isToday(date)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                    <Text style={[opm.arrow, { color: ac, opacity: isToday(date) ? 0.25 : 1 }]}>›</Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={opm.pickerRow}>
+                  <TouchableOpacity onPress={() => onAdjust(-1, 'hour')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                    <Text style={[opm.arrow, { color: ac }]}>‹</Text>
+                  </TouchableOpacity>
+                  <Text style={[opm.val, { color: theme.textPrimary }]}>{fmtHSTTime(date)}</Text>
+                  <TouchableOpacity onPress={() => onAdjust(1, 'hour')} disabled={atNow} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                    <Text style={[opm.arrow, { color: ac, opacity: atNow ? 0.25 : 1 }]}>›</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+              <View style={[opm.actions, { borderTopColor: theme.accentDim }]}>
+                <TouchableOpacity onPress={onClear} style={opm.actionBtn}>
+                  <Text style={[opm.actionText, { color: mu }]}>CLEAR</Text>
+                </TouchableOpacity>
+                <View style={[opm.actionDivider, { backgroundColor: theme.accentDim }]} />
+                <TouchableOpacity onPress={onCancel} style={opm.actionBtn}>
+                  <Text style={[opm.actionText, { color: mu }]}>CANCEL</Text>
+                </TouchableOpacity>
+                <View style={[opm.actionDivider, { backgroundColor: theme.accentDim }]} />
+                <TouchableOpacity onPress={onConfirm} style={opm.actionBtn}>
+                  <Text style={[opm.actionText, { color: ac }]}>COMPARE</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </TouchableWithoutFeedback>
+        </View>
+      </TouchableWithoutFeedback>
+    </Modal>
+  );
+}
+
+const opm = StyleSheet.create({
+  overlay:      { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', alignItems: 'center', justifyContent: 'center' },
+  box:          { width: 290, borderWidth: 1, borderRadius: 6, paddingTop: 20, paddingBottom: 0, overflow: 'hidden' },
+  title:        { fontFamily: 'Courier', fontWeight: '900', fontSize: 14, letterSpacing: 4, textAlign: 'center', marginBottom: 18 },
+  pickerSection:{ marginHorizontal: 20, marginBottom: 18, gap: 10 },
+  pickerRow:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  arrow:        { fontFamily: 'Courier', fontSize: 22, fontWeight: '300', paddingHorizontal: 8 },
+  val:          { fontFamily: 'Courier', fontSize: 12, letterSpacing: 1, flex: 1, textAlign: 'center' },
+  actions:      { flexDirection: 'row', borderTopWidth: 1 },
+  actionBtn:    { flex: 1, paddingVertical: 14, alignItems: 'center' },
+  actionDivider:{ width: 1 },
+  actionText:   { fontFamily: 'Courier', fontWeight: '700', fontSize: 10, letterSpacing: 2 },
+});
 
 export default function HomeScreen() {
   const theme = useTheme();
@@ -500,7 +754,7 @@ export default function HomeScreen() {
   }, [router]);
 
   // ── Wave data ──
-  const nwBuoy    = useBuoyData('51101');
+  const nwBuoy    = useBuoyData('51001');
   const neBuoy    = useBuoyData('51000');
   const hanalei   = useBuoyData('51213');
   const waimeaBay = useBuoyData('51201');
@@ -512,7 +766,7 @@ export default function HomeScreen() {
   const seBuoy    = useBuoyData('51004');
 
   const nearshoreData: Record<string, BuoyReading | null> = {
-    '51101': nwBuoy.data,
+    '51001': nwBuoy.data,
     '51000': neBuoy.data,
     '51213': hanalei.data,
     '51201': waimeaBay.data,
@@ -525,7 +779,7 @@ export default function HomeScreen() {
   };
 
   const nearshoreHistory: Record<string, BuoyReading[]> = {
-    '51101': nwBuoy.history,
+    '51001': nwBuoy.history,
     '51000': neBuoy.history,
     '51213': hanalei.history,
     '51201': waimeaBay.history,
@@ -539,19 +793,45 @@ export default function HomeScreen() {
 
   const { activeStations } = useBuoyList();
 
-  // ── Alerts ──
-  const { settings: alertSettings } = useAlertSettings();
-  const stationNames = useMemo(() => {
-    const m: Record<string, string> = {};
-    NEARSHORE_STATIONS.forEach(s => { m[s.id] = s.name; });
-    return m;
+  // ── Overlay (historical compare) ──
+  const [overlayDate, setOverlayDate] = useState<Date | null>(null);
+  const [overlayPickerVisible, setOverlayPickerVisible] = useState(false);
+  const [overlayPickerDate, setOverlayPickerDate] = useState<Date>(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    return d;
+  });
+  const adjustOverlayDate = useCallback((delta: number, unit: 'day' | 'hour') => {
+    setOverlayPickerDate(prev => {
+      const ms = unit === 'day' ? delta * 86_400_000 : delta * 3_600_000;
+      const next = new Date(prev.getTime() + ms);
+      if (next.getTime() > Date.now()) return new Date();
+      if (next.getTime() < Date.now() - 6 * 86_400_000) return prev; // max 6 days back
+      return next;
+    });
   }, []);
-  useNewSwellAlert(nearshoreHistory, stationNames, alertSettings);
+  const stationIdList = Object.keys(nearshoreData);
+  const { data: overlayData, loading: overlayLoading } = useHistoricalBuoyData(stationIdList, overlayDate);
 
-  // ── Double-tap snapshot ──
+  // ── Log session ──
   const { logSwell } = useSwellLogContext();
   const lastTapRef = useRef<number>(0);
+  const pinchActiveRef = useRef(false);
   const [snapshotMsg, setSnapshotMsg] = useState('');
+  const [logModalVisible, setLogModalVisible] = useState(false);
+  const [logMode, setLogMode] = useState<'now' | 'past'>('now');
+  const [logDate, setLogDate] = useState(new Date());
+  const [logSpot, setLogSpot] = useState('');
+
+  const adjustLogDate = useCallback((delta: number, unit: 'day' | 'hour') => {
+    setLogDate(prev => {
+      const ms = unit === 'day' ? delta * 86_400_000 : delta * 3_600_000;
+      const next = new Date(prev.getTime() + ms);
+      if (next.getTime() > Date.now()) return new Date(); // cap at now
+      if (next.getTime() < Date.now() - 7 * 86_400_000) return prev; // max 7 days back
+      return next;
+    });
+  }, []);
 
   // ── Station selection ──
   const { station: selectedStation, selectStation } = useSelectedStation();
@@ -561,8 +841,8 @@ export default function HomeScreen() {
   const [tideOffset, setTideOffset] = useState(0);
   const { predictions, loading: tidesLoading, refetch: refetchTides } = useTideData(selectedStation.tideStationId, tideOffset);
 
-  const { nowTideHeight, nowTideLabel } = useMemo(() => {
-    if (predictions.length < 2) return { nowTideHeight: null as number | null, nowTideLabel: '' };
+  const { nowTideHeight, nowTideLabel, nowTideState } = useMemo(() => {
+    if (predictions.length < 2) return { nowTideHeight: null as number | null, nowTideLabel: '', nowTideState: '' };
     const todayDate = predictions[0].time.split(' ')[0];
     const toHours = (t: string) => {
       const [d, tm] = t.split(' ');
@@ -580,52 +860,83 @@ export default function HomeScreen() {
     const hr12 = hr24 % 12 || 12;
     const nowLabel = `${hr12}:${String(min).padStart(2, '0')}${isPm ? 'p' : 'a'}`;
     let nowHt: number | null = null;
+    let nowTideState = '';
     for (let i = 0; i < allHours.length - 1; i++) {
       if (nowHour >= allHours[i] && nowHour <= allHours[i + 1]) {
         const t = (nowHour - allHours[i]) / (allHours[i + 1] - allHours[i]);
         const cosT = (1 - Math.cos(t * Math.PI)) / 2;
         nowHt = allHeights[i] + (allHeights[i + 1] - allHeights[i]) * cosT;
+        // Determine tide state from the types of bounding predictions
+        const typeA = predictions[i].type;
+        const typeB = predictions[i + 1].type;
+        if (typeA === 'L' && typeB === 'H') nowTideState = 'RISING';
+        else if (typeA === 'H' && typeB === 'L') nowTideState = 'FALLING';
+        else nowTideState = typeA === 'H' ? 'HIGH' : 'LOW';
         break;
       }
     }
-    return { nowTideHeight: nowHt, nowTideLabel: nowLabel };
+    return { nowTideHeight: nowHt, nowTideLabel: nowLabel, nowTideState };
   }, [predictions]);
 
   // ── Wind data ──
   const { data: windData, refetch: refetchWind } = useWindData(selectedStation.windStationId);
 
-  // ── Double-tap snapshot handler (needs selectedStation, windData, nowTideHeight) ──
+  // ── Offline / cached data detection ──
+  const anyFromCache = nwBuoy.fromCache || neBuoy.fromCache || pauwela.fromCache ||
+    waimeaBay.fromCache || hanalei.fromCache || barberspt.fromCache ||
+    hilo.fromCache || lanai.fromCache || swBuoy.fromCache || seBuoy.fromCache;
+
+  // ── Double-tap → open Log Session modal ──
   const handleDoubleTap = useCallback(() => {
+    if (pinchActiveRef.current) return;
+    // Snapshot only available on MAP (0) or DATA (1) screens
+    if (activeScreen !== 0 && activeScreen !== 1) return;
     const now = Date.now();
     if (now - lastTapRef.current < 350) {
       lastTapRef.current = 0;
       const buoyId = getSnapshotBuoyId(selectedStation.id);
-      const buoyStation = NEARSHORE_STATIONS.find(s => s.id === buoyId);
       const r = nearshoreData[buoyId];
-      if (r && buoyStation && !isOffline(r.timestamp)) {
-        logSwell(r, buoyId, buoyStation.name, {
-          windKt:      windData?.speed ?? null,
-          windGustKt:  windData?.gust  ?? null,
-          windDirDeg:  windData?.dir   ?? null,
-          windDirLabel: windData?.dir != null
-            ? getCardinalDirection(windData.dir) ?? null
-            : null,
-          tideHeightFt: nowTideHeight != null
-            ? Math.round(nowTideHeight * 3.28084 * 10) / 10
-            : null,
-          tideLabel: nowTideLabel || null,
-        });
-        setSnapshotMsg(`SNAPSHOT  ${buoyStation.name}`);
+      if (r && !isOffline(r.timestamp)) {
+        setLogDate(new Date());
+        setLogMode('now');
+        setLogSpot('');
+        setLogModalVisible(true);
       } else {
-        setSnapshotMsg('NO DATA TO SAVE');
+        setSnapshotMsg('NO DATA');
+        setTimeout(() => setSnapshotMsg(''), 2000);
       }
-      setTimeout(() => setSnapshotMsg(''), 2500);
     } else {
       lastTapRef.current = now;
     }
-  }, [selectedStation, nearshoreData, logSwell, windData, nowTideHeight, nowTideLabel]);
+  }, [selectedStation, nearshoreData, activeScreen]);
 
-  // ── Tide swipe ──
+  const handleSaveSession = useCallback(() => {
+    const buoyId = getSnapshotBuoyId(selectedStation.id);
+    const buoyStation = NEARSHORE_STATIONS.find(s => s.id === buoyId);
+    const r = nearshoreData[buoyId];
+    if (r && buoyStation) {
+      const sessionTs = logDate.toISOString();
+      logSwell(r, buoyId, buoyStation.name, {
+        id: `${buoyId}-${sessionTs}`,
+        timestamp: sessionTs,
+        spot: logSpot.trim() || undefined,
+        moonPhase: getMoonPhase(logDate),
+        windKt:       windData?.speed ?? null,
+        windGustKt:   windData?.gust  ?? null,
+        windDirDeg:   windData?.dir   ?? null,
+        windDirLabel: windData?.dir != null ? getCardinalDirection(windData.dir) ?? null : null,
+        tideHeightFt: nowTideHeight != null
+          ? Math.round(nowTideHeight * 3.28084 * 10) / 10
+          : null,
+        tideLabel: nowTideState || null,
+      });
+      setLogModalVisible(false);
+      setSnapshotMsg('SESSION LOGGED');
+      setTimeout(() => setSnapshotMsg(''), 2500);
+    }
+  }, [selectedStation, nearshoreData, logDate, logSwell, windData, nowTideHeight, nowTideLabel, nowTideState]);
+
+  // ── Tide swipe (left = next day, right = prev day) ──
   const tideSwipeX = useRef<number | null>(null);
   const handleTideSwipeStart = useCallback((e: any) => {
     tideSwipeX.current = e.nativeEvent.pageX;
@@ -635,8 +946,8 @@ export default function HomeScreen() {
     const dx = e.nativeEvent.pageX - tideSwipeX.current;
     tideSwipeX.current = null;
     if (Math.abs(dx) < 40) return;
-    if (dx < 0) setTideOffset(o => Math.min(o + 1, 6));   // swipe left → next day
-    else         setTideOffset(o => Math.max(o - 1, 0));   // swipe right → prev day
+    if (dx < 0) setTideOffset(o => Math.min(o + 1, 6));
+    else         setTideOffset(o => Math.max(o - 1, 0));
   }, []);
 
   // ── Pager state ──
@@ -669,7 +980,16 @@ export default function HomeScreen() {
   }, [nwBuoy, neBuoy, hanalei, waimeaBay, pauwela, barberspt, hilo, lanai, swBuoy, seBuoy, refetchTides, refetchWind]);
 
   return (
-    <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.background }]} onTouchEnd={handleDoubleTap}>
+    <SafeAreaView
+      style={[styles.safeArea, { backgroundColor: theme.background }]}
+      onTouchStart={(e) => { if (e.nativeEvent.touches.length > 1) pinchActiveRef.current = true; }}
+      onTouchEnd={(e) => {
+        if (e.nativeEvent.touches.length === 0) {
+          if (!pinchActiveRef.current) handleDoubleTap();
+          pinchActiveRef.current = false;
+        }
+      }}
+    >
       {/* ── Shared header ── */}
       <View style={styles.header}>
         <View>
@@ -678,10 +998,6 @@ export default function HomeScreen() {
             NOAA Real-Time Wave Data · {SCREEN_LABELS[activeScreen]}
           </Text>
         </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-          <TouchableOpacity onPress={() => router.push('/alerts')} activeOpacity={0.7}>
-            <Text style={[styles.navBtn, { color: alertSettings.enabled ? theme.accent : theme.muted }]}>ALERTS</Text>
-          </TouchableOpacity>
         <View style={styles.dots}>
           {SCREEN_LABELS.map((_, i) => (
             <View
@@ -694,9 +1010,17 @@ export default function HomeScreen() {
             />
           ))}
         </View>
-        </View>
       </View>
       <View style={[styles.divider, { backgroundColor: theme.accent }]} />
+
+      {/* ── Offline / cached-data banner ── */}
+      {anyFromCache && (
+        <View style={[styles.offlineBanner, { backgroundColor: theme.accentDim + '44' }]}>
+          <Text style={[styles.offlineText, { color: theme.muted }]}>
+            ⚡ CACHED DATA  ·  NO NETWORK
+          </Text>
+        </View>
+      )}
 
       {/* ── Horizontal pager ── */}
       <ScrollView
@@ -725,7 +1049,7 @@ export default function HomeScreen() {
             >
               <BuoyGrid nearshoreData={nearshoreData} theme={theme} onBuoyPress={handleBuoyPress} />
               <View style={{ height: TIDE_H, backgroundColor: theme.background, marginTop: -2 }}>
-                <View style={{ height: WIND_INFO_H, justifyContent: 'center', alignItems: 'center', paddingBottom: 30, paddingTop: 80 }}>
+                <View style={{ height: WIND_INFO_H, justifyContent: 'center', alignItems: 'center', paddingBottom: 4, paddingTop: 8 }}>
                   <WindTideBar
                     windData={windData}
                     tideStation={selectedStation.name}
@@ -741,10 +1065,7 @@ export default function HomeScreen() {
                     <ActivityIndicator color={theme.accent} />
                   </View>
                 ) : (
-                  <View
-                    onTouchStart={handleTideSwipeStart}
-                    onTouchEnd={handleTideSwipeEnd}
-                  >
+                  <View onTouchStart={handleTideSwipeStart} onTouchEnd={handleTideSwipeEnd}>
                     <TideChart
                       predictions={predictions}
                       width={SCREEN_W}
@@ -755,9 +1076,6 @@ export default function HomeScreen() {
                   </View>
                 )}
               </View>
-              <View style={styles.swipeHint}>
-                <Text style={[styles.swipeText, { color: theme.muted }]}>SWIPE → DATA · LOG</Text>
-              </View>
             </ScrollView>
 
             {/* ── Page 1: Wave Data ── */}
@@ -765,18 +1083,31 @@ export default function HomeScreen() {
               stations={activeStations}
               nearshoreData={nearshoreData}
               nearshoreHistory={nearshoreHistory}
+              overlayData={overlayData}
+              overlayDate={overlayDate}
+              overlayLoading={overlayLoading}
               height={pagerHeight}
               refreshing={isRefreshing}
               onRefresh={handleRefresh}
               theme={theme}
               onBuoyPress={handleBuoyPress}
               onEditPress={() => router.push('/buoys')}
+              onOverlayPress={() => {
+                setOverlayPickerDate(overlayDate ?? (() => {
+                  const d = new Date(); d.setDate(d.getDate() - 1); return d;
+                })());
+                setOverlayPickerVisible(true);
+              }}
+              onOverlayClear={() => setOverlayDate(null)}
             />
 
             {/* ── Page 2: Forecast ── */}
             <ForecastPage height={pagerHeight} theme={theme} stationId={selectedStation.id} />
 
-            {/* ── Page 3: Log Book ── */}
+            {/* ── Page 3: School (birds/ocean) ── */}
+            <SchoolPage height={pagerHeight} theme={theme} stationId={selectedStation.id} />
+
+            {/* ── Page 4: Log Book ── */}
             <LogbookPage height={pagerHeight} theme={theme} />
           </>
         )}
@@ -793,7 +1124,34 @@ export default function HomeScreen() {
         theme={theme}
       />
 
-      {/* Double-tap snapshot feedback */}
+      {/* Log Session modal */}
+      <LogSessionModal
+        visible={logModalVisible}
+        mode={logMode}
+        date={logDate}
+        theme={theme}
+        spot={logSpot}
+        onSpotChange={setLogSpot}
+        onModeChange={m => {
+          setLogMode(m);
+          if (m === 'now') setLogDate(new Date());
+        }}
+        onAdjust={adjustLogDate}
+        onSave={handleSaveSession}
+        onCancel={() => setLogModalVisible(false)}
+      />
+
+      <OverlayPickerModal
+        visible={overlayPickerVisible}
+        date={overlayPickerDate}
+        onAdjust={adjustOverlayDate}
+        onConfirm={() => { setOverlayDate(overlayPickerDate); setOverlayPickerVisible(false); }}
+        onClear={() => { setOverlayDate(null); setOverlayPickerVisible(false); }}
+        onCancel={() => setOverlayPickerVisible(false)}
+        theme={theme}
+      />
+
+      {/* Feedback toast */}
       {snapshotMsg !== '' && (
         <View style={styles.snapshotOverlay} pointerEvents="none">
           <Text style={[styles.snapshotText, { color: theme.accent, borderColor: theme.accent }]}>
@@ -849,25 +1207,10 @@ const styles = StyleSheet.create({
     height: 1,
     opacity: 0.55,
   },
-  swipeHint: {
-    alignItems: 'center',
-    paddingVertical: 7,
-  },
-  swipeText: {
-    fontSize: 10,
-    fontFamily: 'Courier',
-    letterSpacing: 2,
-  },
   tideLoading: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  navBtn: {
-    fontFamily: 'Courier',
-    fontSize: 10,
-    letterSpacing: 2,
-    fontWeight: '700',
   },
   snapshotOverlay: {
     position: 'absolute',
@@ -885,5 +1228,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
     backgroundColor: 'rgba(0,0,0,0.7)',
+  },
+  offlineBanner: {
+    paddingVertical: 5,
+    alignItems: 'center',
+  },
+  offlineText: {
+    fontFamily: 'Courier',
+    fontSize: 9,
+    letterSpacing: 2,
   },
 });
