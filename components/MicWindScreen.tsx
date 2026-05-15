@@ -178,6 +178,56 @@ function CompassRose({ headingDeg, sweepDeg, theme }: { headingDeg: number | nul
   );
 }
 
+// ── Pass indicator dots ───────────────────────────────────────────────────────
+
+function PassDots({ count, needed, theme }: { count: number; needed: number; theme: Theme }) {
+  return (
+    <View style={styles.passDotsRow}>
+      {Array.from({ length: needed }).map((_, i) => (
+        <View
+          key={i}
+          style={[
+            styles.passDot,
+            { backgroundColor: i < count ? theme.accent : theme.accentDim },
+          ]}
+        />
+      ))}
+    </View>
+  );
+}
+
+// ── Result screen ─────────────────────────────────────────────────────────────
+
+function ResultScreen({ result, theme, onReset }: { result: NonNullable<MicWindResult>; theme: Theme; onReset: () => void }) {
+  const hdg = String(Math.round(result.heading)).padStart(3, '0');
+  return (
+    <View style={styles.resultContainer}>
+      <Text style={[styles.resultTitle, { color: theme.muted }]}>WIND FROM</Text>
+      <Text style={[styles.resultDeg, { color: theme.accent }]}>{hdg}°</Text>
+      <Text style={[styles.resultCard, { color: theme.accent }]}>{result.cardinal}</Text>
+      <View style={[styles.resultDivider, { backgroundColor: theme.accentDim }]} />
+      <Text style={[styles.resultKts, { color: theme.textPrimary }]}>{result.knots} KT</Text>
+      <Text style={[styles.resultBf, { color: theme.muted }]}>{result.beaufortInfo.label}</Text>
+      <TouchableOpacity
+        style={[styles.button, { borderColor: theme.accent, backgroundColor: 'transparent', marginTop: 48 }]}
+        onPress={onReset}
+        activeOpacity={0.7}
+      >
+        <Text style={[styles.buttonText, { color: theme.accent }]}>MEASURE AGAIN</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+// ── Main screen ───────────────────────────────────────────────────────────────
+
+interface MicWindResult {
+  heading: number;
+  cardinal: string;
+  knots: number;
+  beaufortInfo: BeaufortInfo;
+}
+
 interface Props {
   theme: Theme;
   height?: number;
@@ -190,13 +240,20 @@ export default function MicWindScreen({ theme, height }: Props) {
     return () => { mic.stop(); };
   }, []);
 
-  const knotsText = mic.estimatedKnots !== null ? `${mic.estimatedKnots.toFixed(1)}` : '--';
-  const dbText = mic.smoothedDb !== null ? `${mic.smoothedDb.toFixed(1)} dBFS` : '-- dBFS';
-
-  // Sweep progress 0–1, target 60°
-  const SWEEP_TARGET = 60;
-  const sweepProgress = Math.min(mic.sweepDeg / SWEEP_TARGET, 1);
+  const knotsText = mic.estimatedKnots !== null ? `${Math.round(mic.estimatedKnots)}` : '--';
   const hasDirection = mic.windHeadingDeg !== null;
+  const PASSES_NEEDED = 3;
+
+  if (mic.isComplete && mic.result) {
+    return (
+      <ScrollView
+        style={[styles.container, { backgroundColor: theme.background, width: W, height, transform: [{ rotate: '180deg' }] }]}
+        contentContainerStyle={[styles.content, { justifyContent: 'center' }]}
+      >
+        <ResultScreen result={mic.result} theme={theme} onReset={() => { mic.reset(); }} />
+      </ScrollView>
+    );
+  }
 
   return (
     <ScrollView
@@ -205,10 +262,6 @@ export default function MicWindScreen({ theme, height }: Props) {
     >
       <Text style={[styles.title, { color: theme.accent }]}>MIC WIND</Text>
       <View style={[styles.divider, { backgroundColor: theme.accent }]} />
-
-      <Text style={[styles.hint, { color: theme.muted }]}>
-        Point mic into the wind · hold steady · allow 5–10 sec to stabilize
-      </Text>
 
       <WindGauge beaufortFractional={mic.beaufortFractional} isRecording={mic.isRecording} theme={theme} />
 
@@ -224,7 +277,7 @@ export default function MicWindScreen({ theme, height }: Props) {
         <Text style={[styles.speedValue, { color: mic.isRecording ? theme.textPrimary : theme.accentDim }]}>
           {knotsText}
         </Text>
-        <Text style={[styles.speedUnit, { color: theme.muted }]}>kts</Text>
+        <Text style={[styles.speedUnit, { color: theme.muted }]}>KT</Text>
       </View>
 
       <View style={styles.beaufortLabelWrap}>
@@ -236,13 +289,7 @@ export default function MicWindScreen({ theme, height }: Props) {
         </Text>
       </View>
 
-      {mic.isRecording && (
-        <Text style={[styles.description, { color: theme.muted }]}>
-          {mic.beaufortInfo.description}
-        </Text>
-      )}
-
-      {/* ── Wind direction section ── */}
+      {/* ── Direction sweep section ── */}
       {mic.isRecording && (
         <View style={[styles.dirSection, { borderTopColor: theme.accentDim }]}>
           <Text style={[styles.dirTitle, { color: theme.accent }]}>WIND DIRECTION</Text>
@@ -262,43 +309,24 @@ export default function MicWindScreen({ theme, height }: Props) {
               ) : (
                 <Text style={[styles.dirPrompt, { color: theme.muted }]}>
                   {mic.sweepDeg < 15
-                    ? 'Slowly rotate\nphone across\nwind line'
-                    : `Sweep: ${Math.round(mic.sweepDeg)}°\nKeep rotating…`}
+                    ? 'Slowly sweep\nphone across\nwind line'
+                    : `Sweep: ${Math.round(mic.sweepDeg)}°\nKeep sweeping…`}
                 </Text>
               )}
             </View>
           </View>
 
-          {/* Sweep progress bar */}
-          <View style={[styles.sweepTrack, { backgroundColor: theme.accentDim }]}>
-            <View style={[
-              styles.sweepFill,
-              { width: `${sweepProgress * 100}%`, backgroundColor: hasDirection ? theme.accent : theme.muted },
-            ]} />
-          </View>
-          <View style={styles.sweepLabels}>
-            <Text style={[styles.sweepLabel, { color: theme.muted }]}>0°</Text>
-            <Text style={[styles.sweepLabel, { color: hasDirection ? theme.accent : theme.muted }]}>
-              {SWEEP_TARGET}° {hasDirection ? '✓' : ''}
-            </Text>
-          </View>
-        </View>
-      )}
-
-      {/* dBFS / range rows */}
-      <View style={styles.levelRow}>
-        <Text style={[styles.levelLabel, { color: theme.muted }]}>MIC LEVEL</Text>
-        <Text style={[styles.levelValue, { color: mic.isRecording ? theme.textPrimary : theme.accentDim }]}>
-          {dbText}
-        </Text>
-      </View>
-
-      {mic.isRecording && (
-        <View style={styles.rangeRow}>
-          <Text style={[styles.levelLabel, { color: theme.muted }]}>RANGE</Text>
-          <Text style={[styles.levelValue, { color: theme.textPrimary }]}>
-            {mic.beaufortInfo.knotsMin}–{mic.beaufortInfo.knotsMax} kts
-          </Text>
+          {/* Pass counter */}
+          {hasDirection && (
+            <View style={styles.passRow}>
+              <Text style={[styles.passLabel, { color: theme.muted }]}>
+                {mic.passCount < PASSES_NEEDED
+                  ? `PASS ${mic.passCount + 1} OF ${PASSES_NEEDED} — KEEP SWEEPING`
+                  : 'LOCKING…'}
+              </Text>
+              <PassDots count={mic.passCount} needed={PASSES_NEEDED} theme={theme} />
+            </View>
+          )}
         </View>
       )}
 
@@ -316,8 +344,14 @@ export default function MicWindScreen({ theme, height }: Props) {
         </Text>
       </TouchableOpacity>
 
+      {!mic.isRecording && (
+        <Text style={[styles.hint, { color: theme.muted }]}>
+          Hold phone upside-down · mic faces wind · sweep slowly side to side
+        </Text>
+      )}
+
       <Text style={[styles.disclaimer, { color: theme.accentDim }]}>
-        Estimate only · accuracy varies by device, wind angle, and background noise
+        Estimate only · accuracy varies by device and background noise
       </Text>
     </ScrollView>
   );
@@ -362,4 +396,17 @@ const styles = StyleSheet.create({
   button: { marginTop: 28, paddingVertical: 14, paddingHorizontal: 40, borderWidth: 2, borderRadius: 4 },
   buttonText: { fontSize: 15, fontFamily: 'Courier', fontWeight: '900', letterSpacing: 4 },
   disclaimer: { fontSize: 9, fontFamily: 'Courier', letterSpacing: 1, textAlign: 'center', marginTop: 20 },
+  // Pass dots
+  passRow:       { alignItems: 'center', marginTop: 10, gap: 8 },
+  passLabel:     { fontSize: 9, fontFamily: 'Courier', letterSpacing: 1.5, textAlign: 'center' },
+  passDotsRow:   { flexDirection: 'row', gap: 10, marginTop: 4 },
+  passDot:       { width: 12, height: 12, borderRadius: 6 },
+  // Result screen
+  resultContainer: { alignItems: 'center', paddingVertical: 40 },
+  resultTitle:   { fontSize: 11, fontFamily: 'Courier', letterSpacing: 4, marginBottom: 12 },
+  resultDeg:     { fontSize: 80, fontFamily: 'Courier', fontWeight: '900', letterSpacing: -2, lineHeight: 86 },
+  resultCard:    { fontSize: 42, fontFamily: 'Courier', fontWeight: '900', letterSpacing: 4, marginTop: 4 },
+  resultDivider: { height: 1, width: 120, opacity: 0.4, marginVertical: 24 },
+  resultKts:     { fontSize: 52, fontFamily: 'Courier', fontWeight: '900', letterSpacing: 2 },
+  resultBf:      { fontSize: 14, fontFamily: 'Courier', letterSpacing: 3, marginTop: 6 },
 });
