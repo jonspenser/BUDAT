@@ -343,9 +343,6 @@ export default function MicWindScreen({ theme, height }: Props) {
       </TouchableOpacity>
 
 
-      <Text style={[styles.disclaimer, { color: theme.accentDim }]}>
-        Estimate only · accuracy varies by device and background noise
-      </Text>
     </ScrollView>
   );
 }
