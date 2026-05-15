@@ -258,7 +258,7 @@ export default function MicWindScreen({ theme, height }: Props) {
       style={[styles.container, { backgroundColor: theme.background, width: W, height, transform: [{ rotate: '180deg' }] }]}
       contentContainerStyle={styles.content}
     >
-      <Text style={[styles.title, { color: theme.accent }]}>MIC WIND</Text>
+      <Text style={[styles.title, { color: theme.accent }]}>ANEMOMETER</Text>
       <View style={[styles.divider, { backgroundColor: theme.accent }]} />
 
       <WindGauge beaufortFractional={mic.beaufortFractional} isRecording={mic.isRecording} theme={theme} />
