@@ -7,7 +7,7 @@ import {
   Dimensions,
   ScrollView,
 } from 'react-native';
-import Svg, { Circle, Arc, Path } from 'react-native-svg';
+import Svg, { Circle, Path, Line, G } from 'react-native-svg';
 import { Theme } from '../constants/colors';
 import { useMicWind, BeaufortInfo } from '../hooks/useMicWind';
 
@@ -15,7 +15,6 @@ const { width: W } = Dimensions.get('window');
 const GAUGE_R = W * 0.38;
 const CX = W / 2;
 
-// Arc from 210° to 330° (240° sweep) for the Beaufort gauge
 const START_DEG = 210;
 const SWEEP_DEG = 240;
 
@@ -45,7 +44,6 @@ function WindGauge({ beaufortFractional, isRecording, theme }: GaugeProps) {
 
   return (
     <Svg width={W} height={GAUGE_R * 2 + 40}>
-      {/* Track arc */}
       <Path
         d={describeArc(CX, cy, GAUGE_R, START_DEG, START_DEG + SWEEP_DEG)}
         stroke={theme.accentDim}
@@ -53,7 +51,6 @@ function WindGauge({ beaufortFractional, isRecording, theme }: GaugeProps) {
         fill="none"
         strokeLinecap="round"
       />
-      {/* Filled arc */}
       {fillDeg > 0 && (
         <Path
           d={describeArc(CX, cy, GAUGE_R, START_DEG, endDeg)}
@@ -63,7 +60,6 @@ function WindGauge({ beaufortFractional, isRecording, theme }: GaugeProps) {
           strokeLinecap="round"
         />
       )}
-      {/* Beaufort tick marks */}
       {Array.from({ length: 9 }, (_, i) => {
         const deg = START_DEG + (i / 8) * SWEEP_DEG;
         const inner = polarToXY(CX, cy, GAUGE_R - 18, deg);
@@ -77,25 +73,9 @@ function WindGauge({ beaufortFractional, isRecording, theme }: GaugeProps) {
           />
         );
       })}
-      {/* Beaufort number labels */}
-      {Array.from({ length: 9 }, (_, i) => {
-        const deg = START_DEG + (i / 8) * SWEEP_DEG;
-        const pos = polarToXY(CX, cy, GAUGE_R - 34, deg);
-        return (
-          <React.Fragment key={i}>
-            <Path
-              d={`M ${pos.x - 0.01} ${pos.y - 0.01} L ${pos.x} ${pos.y}`}
-              stroke="none"
-              fill="none"
-            />
-          </React.Fragment>
-        );
-      })}
-      {/* Needle dot */}
       {isRecording && beaufortFractional > 0 && (
         <Circle cx={needlePt.x} cy={needlePt.y} r={6} fill={theme.accent} />
       )}
-      {/* Center dot */}
       <Circle cx={CX} cy={cy} r={5} fill={theme.accentDim} />
     </Svg>
   );
@@ -125,6 +105,79 @@ function BeaufortBar({ beaufortFractional, isRecording, theme }: GaugeProps) {
   );
 }
 
+// Mini compass rose showing wind direction arrow
+function CompassRose({ headingDeg, sweepDeg, theme }: { headingDeg: number | null; sweepDeg: number; theme: Theme }) {
+  const SIZE = 100;
+  const cx = SIZE / 2;
+  const cy = SIZE / 2;
+  const r = SIZE * 0.42;
+
+  // Sweep arc: show the range scanned (centred on detected heading or 0°)
+  const sweepFraction = Math.min(sweepDeg / 180, 1);
+  const hasDir = headingDeg !== null;
+
+  // Arrow pointing to wind-from direction
+  const arrowRad = headingDeg !== null ? ((headingDeg - 90) * Math.PI) / 180 : -Math.PI / 2;
+  const arrowTip = { x: cx + r * 0.72 * Math.cos(arrowRad), y: cy + r * 0.72 * Math.sin(arrowRad) };
+  const arrowBase = { x: cx - r * 0.4 * Math.cos(arrowRad), y: cy - r * 0.4 * Math.sin(arrowRad) };
+
+  // Sweep arc centred on detected heading (or north if none)
+  const sweepCenter = headingDeg ?? 0;
+  const halfSweep = (sweepDeg / 2);
+  const arcStart = sweepCenter - halfSweep;
+  const arcEnd = sweepCenter + halfSweep;
+
+  const cardinals = [
+    { label: 'N', deg: 0 }, { label: 'E', deg: 90 },
+    { label: 'S', deg: 180 }, { label: 'W', deg: 270 },
+  ];
+
+  return (
+    <Svg width={SIZE} height={SIZE}>
+      {/* Outer ring */}
+      <Circle cx={cx} cy={cy} r={r} stroke={theme.accentDim} strokeWidth={1} fill="none" />
+
+      {/* Sweep arc (how much the user has rotated) */}
+      {sweepFraction > 0.05 && (
+        <Path
+          d={describeArc(cx, cy, r * 0.78, arcStart, arcEnd)}
+          stroke={hasDir ? theme.accent : theme.muted}
+          strokeWidth={4}
+          fill="none"
+          strokeLinecap="round"
+          opacity={0.5}
+        />
+      )}
+
+      {/* Cardinal tick marks */}
+      {cardinals.map(({ label, deg }) => {
+        const rad = ((deg - 90) * Math.PI) / 180;
+        const outer = { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+        const inner = { x: cx + r * 0.82 * Math.cos(rad), y: cy + r * 0.82 * Math.sin(rad) };
+        const textPos = { x: cx + r * 1.18 * Math.cos(rad), y: cy + r * 1.18 * Math.sin(rad) };
+        return (
+          <G key={label}>
+            <Line x1={inner.x} y1={inner.y} x2={outer.x} y2={outer.y} stroke={theme.accentDim} strokeWidth={1.5} />
+          </G>
+        );
+      })}
+
+      {/* Wind direction arrow */}
+      {hasDir && (
+        <Path
+          d={`M ${arrowBase.x} ${arrowBase.y} L ${arrowTip.x} ${arrowTip.y}`}
+          stroke={theme.accent}
+          strokeWidth={2.5}
+          strokeLinecap="round"
+        />
+      )}
+
+      {/* Center dot */}
+      <Circle cx={cx} cy={cy} r={3} fill={hasDir ? theme.accent : theme.accentDim} />
+    </Svg>
+  );
+}
+
 interface Props {
   theme: Theme;
   height?: number;
@@ -134,22 +187,20 @@ export default function MicWindScreen({ theme, height }: Props) {
   const mic = useMicWind();
 
   useEffect(() => {
-    return () => {
-      mic.stop();
-    };
+    return () => { mic.stop(); };
   }, []);
 
-  const knotsText = mic.estimatedKnots !== null
-    ? `${mic.estimatedKnots.toFixed(1)}`
-    : '--';
+  const knotsText = mic.estimatedKnots !== null ? `${mic.estimatedKnots.toFixed(1)}` : '--';
+  const dbText = mic.smoothedDb !== null ? `${mic.smoothedDb.toFixed(1)} dBFS` : '-- dBFS';
 
-  const dbText = mic.smoothedDb !== null
-    ? `${mic.smoothedDb.toFixed(1)} dBFS`
-    : '-- dBFS';
+  // Sweep progress 0–1, target 60°
+  const SWEEP_TARGET = 60;
+  const sweepProgress = Math.min(mic.sweepDeg / SWEEP_TARGET, 1);
+  const hasDirection = mic.windHeadingDeg !== null;
 
   return (
     <ScrollView
-      style={[styles.container, { backgroundColor: theme.background, width: W, height: height, transform: [{ rotate: '180deg' }] }]}
+      style={[styles.container, { backgroundColor: theme.background, width: W, height, transform: [{ rotate: '180deg' }] }]}
       contentContainerStyle={styles.content}
     >
       <Text style={[styles.title, { color: theme.accent }]}>MIC WIND</Text>
@@ -159,21 +210,10 @@ export default function MicWindScreen({ theme, height }: Props) {
         Point mic into the wind · hold steady · allow 5–10 sec to stabilize
       </Text>
 
-      {/* Gauge */}
-      <WindGauge
-        beaufortFractional={mic.beaufortFractional}
-        isRecording={mic.isRecording}
-        theme={theme}
-      />
+      <WindGauge beaufortFractional={mic.beaufortFractional} isRecording={mic.isRecording} theme={theme} />
 
-      {/* Beaufort bar */}
-      <BeaufortBar
-        beaufortFractional={mic.beaufortFractional}
-        isRecording={mic.isRecording}
-        theme={theme}
-      />
+      <BeaufortBar beaufortFractional={mic.beaufortFractional} isRecording={mic.isRecording} theme={theme} />
 
-      {/* Beaufort labels */}
       <View style={styles.bfLabelRow}>
         <Text style={[styles.bfLabelEdge, { color: theme.muted }]}>B0</Text>
         <Text style={[styles.bfLabelEdge, { color: theme.muted }]}>B8</Text>
@@ -187,7 +227,6 @@ export default function MicWindScreen({ theme, height }: Props) {
         <Text style={[styles.speedUnit, { color: theme.muted }]}>kts</Text>
       </View>
 
-      {/* Beaufort label */}
       <View style={styles.beaufortLabelWrap}>
         <Text style={[styles.beaufortNumber, { color: theme.accent }]}>
           {mic.isRecording ? `B${mic.beaufortInfo.number}` : '--'}
@@ -203,7 +242,50 @@ export default function MicWindScreen({ theme, height }: Props) {
         </Text>
       )}
 
-      {/* dBFS level */}
+      {/* ── Wind direction section ── */}
+      {mic.isRecording && (
+        <View style={[styles.dirSection, { borderTopColor: theme.accentDim }]}>
+          <Text style={[styles.dirTitle, { color: theme.accent }]}>WIND DIRECTION</Text>
+
+          <View style={styles.dirBody}>
+            <CompassRose headingDeg={mic.windHeadingDeg} sweepDeg={mic.sweepDeg} theme={theme} />
+
+            <View style={styles.dirRight}>
+              {hasDirection ? (
+                <>
+                  <Text style={[styles.dirCardinal, { color: theme.accent }]}>{mic.windCardinal}</Text>
+                  <Text style={[styles.dirDeg, { color: theme.textPrimary }]}>
+                    {Math.round(mic.windHeadingDeg!)}°
+                  </Text>
+                  <Text style={[styles.dirLabel, { color: theme.muted }]}>FROM</Text>
+                </>
+              ) : (
+                <Text style={[styles.dirPrompt, { color: theme.muted }]}>
+                  {mic.sweepDeg < 15
+                    ? 'Slowly rotate\nphone across\nwind line'
+                    : `Sweep: ${Math.round(mic.sweepDeg)}°\nKeep rotating…`}
+                </Text>
+              )}
+            </View>
+          </View>
+
+          {/* Sweep progress bar */}
+          <View style={[styles.sweepTrack, { backgroundColor: theme.accentDim }]}>
+            <View style={[
+              styles.sweepFill,
+              { width: `${sweepProgress * 100}%`, backgroundColor: hasDirection ? theme.accent : theme.muted },
+            ]} />
+          </View>
+          <View style={styles.sweepLabels}>
+            <Text style={[styles.sweepLabel, { color: theme.muted }]}>0°</Text>
+            <Text style={[styles.sweepLabel, { color: hasDirection ? theme.accent : theme.muted }]}>
+              {SWEEP_TARGET}° {hasDirection ? '✓' : ''}
+            </Text>
+          </View>
+        </View>
+      )}
+
+      {/* dBFS / range rows */}
       <View style={styles.levelRow}>
         <Text style={[styles.levelLabel, { color: theme.muted }]}>MIC LEVEL</Text>
         <Text style={[styles.levelValue, { color: mic.isRecording ? theme.textPrimary : theme.accentDim }]}>
@@ -211,7 +293,6 @@ export default function MicWindScreen({ theme, height }: Props) {
         </Text>
       </View>
 
-      {/* Knot range for this Beaufort */}
       {mic.isRecording && (
         <View style={styles.rangeRow}>
           <Text style={[styles.levelLabel, { color: theme.muted }]}>RANGE</Text>
@@ -221,17 +302,12 @@ export default function MicWindScreen({ theme, height }: Props) {
         </View>
       )}
 
-      {/* Error */}
       {mic.error && (
         <Text style={[styles.error, { color: theme.accent }]}>{mic.error}</Text>
       )}
 
-      {/* Start / Stop button */}
       <TouchableOpacity
-        style={[
-          styles.button,
-          { borderColor: theme.accent, backgroundColor: mic.isRecording ? theme.accent : 'transparent' },
-        ]}
+        style={[styles.button, { borderColor: theme.accent, backgroundColor: mic.isRecording ? theme.accent : 'transparent' }]}
         onPress={mic.isRecording ? mic.stop : mic.start}
         activeOpacity={0.7}
       >
@@ -248,158 +324,42 @@ export default function MicWindScreen({ theme, height }: Props) {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  content: {
-    paddingHorizontal: 18,
-    paddingTop: 18,
-    paddingBottom: 36,
-    alignItems: 'center',
-  },
-  title: {
-    fontSize: 18,
-    fontFamily: 'Courier',
-    fontWeight: '900',
-    letterSpacing: 4,
-    alignSelf: 'flex-start',
-    marginBottom: 8,
-  },
-  divider: {
-    height: 1,
-    opacity: 0.55,
-    alignSelf: 'stretch',
-    marginBottom: 14,
-  },
-  hint: {
-    fontSize: 10,
-    fontFamily: 'Courier',
-    letterSpacing: 1,
-    textAlign: 'center',
-    marginBottom: 8,
-  },
-  bfBar: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 4,
-    marginTop: 8,
-    height: 40,
-  },
-  bfSegment: {
-    width: 22,
-    borderRadius: 2,
-  },
-  bfLabelRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignSelf: 'stretch',
-    marginTop: 4,
-    marginBottom: 16,
-    paddingHorizontal: 4,
-  },
-  bfLabelEdge: {
-    fontSize: 9,
-    fontFamily: 'Courier',
-    letterSpacing: 1,
-  },
-  readout: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 6,
-  },
-  speedValue: {
-    fontSize: 72,
-    fontFamily: 'Courier',
-    fontWeight: '900',
-    letterSpacing: -2,
-    lineHeight: 80,
-  },
-  speedUnit: {
-    fontSize: 22,
-    fontFamily: 'Courier',
-    fontWeight: '600',
-    letterSpacing: 2,
-    marginBottom: 4,
-  },
-  beaufortLabelWrap: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 10,
-    marginTop: 6,
-  },
-  beaufortNumber: {
-    fontSize: 22,
-    fontFamily: 'Courier',
-    fontWeight: '900',
-    letterSpacing: 2,
-  },
-  beaufortLabel: {
-    fontSize: 16,
-    fontFamily: 'Courier',
-    fontWeight: '700',
-    letterSpacing: 3,
-  },
-  description: {
-    fontSize: 11,
-    fontFamily: 'Courier',
-    letterSpacing: 1,
-    textAlign: 'center',
-    marginTop: 6,
-    marginBottom: 16,
-  },
-  levelRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignSelf: 'stretch',
-    marginTop: 16,
-    paddingVertical: 10,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(128,128,128,0.2)',
-  },
-  rangeRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignSelf: 'stretch',
-    paddingVertical: 10,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(128,128,128,0.2)',
-  },
-  levelLabel: {
-    fontSize: 10,
-    fontFamily: 'Courier',
-    letterSpacing: 2,
-  },
-  levelValue: {
-    fontSize: 13,
-    fontFamily: 'Courier',
-    fontWeight: '600',
-    letterSpacing: 1,
-  },
-  error: {
-    fontSize: 12,
-    fontFamily: 'Courier',
-    letterSpacing: 1,
-    marginTop: 10,
-    textAlign: 'center',
-  },
-  button: {
-    marginTop: 28,
-    paddingVertical: 14,
-    paddingHorizontal: 40,
-    borderWidth: 2,
-    borderRadius: 4,
-  },
-  buttonText: {
-    fontSize: 15,
-    fontFamily: 'Courier',
-    fontWeight: '900',
-    letterSpacing: 4,
-  },
-  disclaimer: {
-    fontSize: 9,
-    fontFamily: 'Courier',
-    letterSpacing: 1,
-    textAlign: 'center',
-    marginTop: 20,
-  },
+  container: { flex: 1 },
+  content: { paddingHorizontal: 18, paddingTop: 18, paddingBottom: 36, alignItems: 'center' },
+  title: { fontSize: 18, fontFamily: 'Courier', fontWeight: '900', letterSpacing: 4, alignSelf: 'flex-start', marginBottom: 8 },
+  divider: { height: 1, opacity: 0.55, alignSelf: 'stretch', marginBottom: 14 },
+  hint: { fontSize: 10, fontFamily: 'Courier', letterSpacing: 1, textAlign: 'center', marginBottom: 8 },
+  bfBar: { flexDirection: 'row', alignItems: 'flex-end', gap: 4, marginTop: 8, height: 40 },
+  bfSegment: { width: 22, borderRadius: 2 },
+  bfLabelRow: { flexDirection: 'row', justifyContent: 'space-between', alignSelf: 'stretch', marginTop: 4, marginBottom: 16, paddingHorizontal: 4 },
+  bfLabelEdge: { fontSize: 9, fontFamily: 'Courier', letterSpacing: 1 },
+  readout: { flexDirection: 'row', alignItems: 'baseline', gap: 6 },
+  speedValue: { fontSize: 72, fontFamily: 'Courier', fontWeight: '900', letterSpacing: -2, lineHeight: 80 },
+  speedUnit: { fontSize: 22, fontFamily: 'Courier', fontWeight: '600', letterSpacing: 2, marginBottom: 4 },
+  beaufortLabelWrap: { flexDirection: 'row', alignItems: 'baseline', gap: 10, marginTop: 6 },
+  beaufortNumber: { fontSize: 22, fontFamily: 'Courier', fontWeight: '900', letterSpacing: 2 },
+  beaufortLabel: { fontSize: 16, fontFamily: 'Courier', fontWeight: '700', letterSpacing: 3 },
+  description: { fontSize: 11, fontFamily: 'Courier', letterSpacing: 1, textAlign: 'center', marginTop: 6, marginBottom: 8 },
+  // Direction section
+  dirSection: { alignSelf: 'stretch', marginTop: 16, paddingTop: 16, borderTopWidth: 1 },
+  dirTitle: { fontSize: 11, fontFamily: 'Courier', fontWeight: '700', letterSpacing: 3, marginBottom: 12 },
+  dirBody: { flexDirection: 'row', alignItems: 'center', gap: 20, marginBottom: 14 },
+  dirRight: { flex: 1 },
+  dirCardinal: { fontSize: 36, fontFamily: 'Courier', fontWeight: '900', letterSpacing: 2 },
+  dirDeg: { fontSize: 20, fontFamily: 'Courier', fontWeight: '600', letterSpacing: 1, marginTop: 2 },
+  dirLabel: { fontSize: 9, fontFamily: 'Courier', letterSpacing: 2, marginTop: 2 },
+  dirPrompt: { fontSize: 11, fontFamily: 'Courier', letterSpacing: 1, lineHeight: 18 },
+  sweepTrack: { height: 4, alignSelf: 'stretch', borderRadius: 2, overflow: 'hidden' },
+  sweepFill: { height: '100%', borderRadius: 2 },
+  sweepLabels: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
+  sweepLabel: { fontSize: 9, fontFamily: 'Courier', letterSpacing: 1 },
+  // Data rows
+  levelRow: { flexDirection: 'row', justifyContent: 'space-between', alignSelf: 'stretch', marginTop: 16, paddingVertical: 10, borderTopWidth: 1, borderTopColor: 'rgba(128,128,128,0.2)' },
+  rangeRow: { flexDirection: 'row', justifyContent: 'space-between', alignSelf: 'stretch', paddingVertical: 10, borderTopWidth: 1, borderTopColor: 'rgba(128,128,128,0.2)' },
+  levelLabel: { fontSize: 10, fontFamily: 'Courier', letterSpacing: 2 },
+  levelValue: { fontSize: 13, fontFamily: 'Courier', fontWeight: '600', letterSpacing: 1 },
+  error: { fontSize: 12, fontFamily: 'Courier', letterSpacing: 1, marginTop: 10, textAlign: 'center' },
+  button: { marginTop: 28, paddingVertical: 14, paddingHorizontal: 40, borderWidth: 2, borderRadius: 4 },
+  buttonText: { fontSize: 15, fontFamily: 'Courier', fontWeight: '900', letterSpacing: 4 },
+  disclaimer: { fontSize: 9, fontFamily: 'Courier', letterSpacing: 1, textAlign: 'center', marginTop: 20 },
 });
