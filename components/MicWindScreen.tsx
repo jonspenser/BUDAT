@@ -342,11 +342,6 @@ export default function MicWindScreen({ theme, height }: Props) {
         </Text>
       </TouchableOpacity>
 
-      {!mic.isRecording && (
-        <Text style={[styles.hint, { color: theme.muted }]}>
-          Hold phone upside-down · mic faces wind · sweep slowly side to side
-        </Text>
-      )}
 
       <Text style={[styles.disclaimer, { color: theme.accentDim }]}>
         Estimate only · accuracy varies by device and background noise
