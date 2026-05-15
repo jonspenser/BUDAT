@@ -149,7 +149,7 @@ export default function MicWindScreen({ theme, height }: Props) {
 
   return (
     <ScrollView
-      style={[styles.container, { backgroundColor: theme.background, width: W, height: height }]}
+      style={[styles.container, { backgroundColor: theme.background, width: W, height: height, transform: [{ rotate: '180deg' }] }]}
       contentContainerStyle={styles.content}
     >
       <Text style={[styles.title, { color: theme.accent }]}>MIC WIND</Text>
