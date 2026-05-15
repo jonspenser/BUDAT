@@ -22,17 +22,17 @@ const BEAUFORT: BeaufortInfo[] = [
 ];
 
 // dBFS breakpoints mapped to Beaufort numbers (0–8).
-// These are tuned for a phone microphone held into moving air.
+// Shifted +12 dB from initial calibration (1/4 sensitivity: 4× amplitude needed per level).
 const DB_BREAKPOINTS: [number, number][] = [
-  [-70, 0],
-  [-55, 1],
-  [-47, 2],
-  [-40, 3],
-  [-33, 4],
-  [-24, 5],
-  [-16, 6],
-  [-9,  7],
-  [-3,  8],
+  [-58, 0],
+  [-43, 1],
+  [-35, 2],
+  [-28, 3],
+  [-21, 4],
+  [-12, 5],
+  [-5,  6],
+  [-2,  7],
+  [0,   8],
 ];
 
 function dbToBeaufort(db: number): number {
