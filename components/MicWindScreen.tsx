@@ -338,7 +338,7 @@ export default function MicWindScreen({ theme, height }: Props) {
         activeOpacity={0.7}
       >
         <Text style={[styles.buttonText, { color: mic.isRecording ? theme.background : theme.accent }]}>
-          {mic.isRecording ? 'STOP' : 'START MEASURING'}
+          {mic.isRecording ? 'STOP' : 'RECORD'}
         </Text>
       </TouchableOpacity>
 
