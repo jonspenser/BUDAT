@@ -202,7 +202,6 @@ function ResultScreen({ result, theme, onReset }: { result: NonNullable<MicWindR
   const hdg = String(Math.round(result.heading)).padStart(3, '0');
   return (
     <View style={styles.resultContainer}>
-      <Text style={[styles.resultTitle, { color: theme.muted }]}>WIND FROM</Text>
       <Text style={[styles.resultDeg, { color: theme.accent }]}>{hdg}°</Text>
       <Text style={[styles.resultCard, { color: theme.accent }]}>{result.cardinal}</Text>
       <View style={[styles.resultDivider, { backgroundColor: theme.accentDim }]} />
