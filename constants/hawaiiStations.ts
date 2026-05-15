@@ -12,6 +12,7 @@ export const HAWAII_STATIONS: HawaiiStation[] = [
   { id: 'nawiliwili', name: 'NAWILIWILI', island: 'KAUAI',   windStationId: 'NWWH1',  tideStationId: '1619000' },
   { id: 'hilo',       name: 'HILO',       island: 'HAWAII',  windStationId: 'OOUH1',  tideStationId: '1617760' },
   { id: 'kawaihae',   name: 'KAWAIHAE',   island: 'HAWAII',  windStationId: 'KWHH1',  tideStationId: '1617433' },
+  { id: 'lanai',      name: 'MANELE BAY', island: 'LANAI',   windStationId: 'KLIH1',  tideStationId: '1615680' },
 ];
 
 export const DEFAULT_STATION = HAWAII_STATIONS[0];

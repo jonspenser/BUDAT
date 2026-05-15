@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useRouter } from 'expo-router';
 import {
   View,
@@ -484,6 +484,7 @@ const STATION_BUOY_MAP: Record<string, string> = {
   hilo:       '51206', // Hilo
   nawiliwili: '51213', // Hanalei
   kawaihae:   '51206', // Hilo (closest Big Island buoy)
+  lanai:      '51212', // Lanai buoy
 };
 
 function getSnapshotBuoyId(stationId: string): string {
