@@ -332,6 +332,12 @@ export default function MicWindScreen({ theme, height }: Props) {
         <Text style={[styles.error, { color: theme.accent }]}>{mic.error}</Text>
       )}
 
+      {!mic.isRecording && (
+        <Text style={[styles.hint, { color: theme.muted }]}>
+          Point phone at wind and slowly pan left and right to capture peak signal
+        </Text>
+      )}
+
       <TouchableOpacity
         style={[styles.button, { borderColor: theme.accent, backgroundColor: mic.isRecording ? theme.accent : 'transparent' }]}
         onPress={mic.isRecording ? mic.stop : mic.start}
