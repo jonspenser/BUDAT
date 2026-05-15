@@ -32,3 +32,6 @@ yarn-error.*
 # iOS
 ios/Pods/
 ios/.xcode.env.local
+
+# Claude Code
+.claude/worktrees/
