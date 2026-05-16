@@ -14,6 +14,8 @@ export default function RootLayout() {
           <Stack.Screen name="buoys" options={{ gestureEnabled: true, gestureDirection: 'horizontal' }} />
           <Stack.Screen name="forecast" options={{ gestureEnabled: true, gestureDirection: 'horizontal' }} />
           <Stack.Screen name="logbook" options={{ gestureEnabled: false }} />
+          <Stack.Screen name="alerts" options={{ gestureEnabled: true, gestureDirection: 'horizontal' }} />
+          <Stack.Screen name="micwind" options={{ gestureEnabled: true, gestureDirection: 'horizontal' }} />
         </Stack>
       </SwellLogProvider>
     </GestureHandlerRootView>
