@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   StyleSheet,
   Dimensions,
   ScrollView,
+  Animated,
 } from 'react-native';
 import Svg, { Circle, Path, Line, G } from 'react-native-svg';
 import { Theme } from '../constants/colors';
@@ -178,6 +179,46 @@ function CompassRose({ headingDeg, sweepDeg, theme }: { headingDeg: number | nul
   );
 }
 
+// ── Pan arrows ────────────────────────────────────────────────────────────────
+
+function PanArrows({ theme }: { theme: Theme }) {
+  const anim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(anim, { toValue: 1, duration: 700, useNativeDriver: true }),
+        Animated.delay(150),
+        Animated.timing(anim, { toValue: 0, duration: 700, useNativeDriver: true }),
+        Animated.delay(150),
+      ])
+    ).start();
+  }, []);
+
+  const leftOpacity  = anim.interpolate({ inputRange: [0, 1], outputRange: [1, 0.15] });
+  const rightOpacity = anim.interpolate({ inputRange: [0, 1], outputRange: [0.15, 1] });
+
+  const arrowStyle = { width: 0, height: 0 };
+
+  return (
+    <View style={styles.panArrowRow}>
+      <Animated.View style={{ opacity: leftOpacity }}>
+        <Svg width={28} height={28}>
+          <Path d="M20 4 L6 14 L20 24 Z" fill={theme.accent} />
+        </Svg>
+      </Animated.View>
+
+      <Text style={[styles.panArrowLabel, { color: theme.muted }]}>PAN</Text>
+
+      <Animated.View style={{ opacity: rightOpacity }}>
+        <Svg width={28} height={28}>
+          <Path d="M8 4 L22 14 L8 24 Z" fill={theme.accent} />
+        </Svg>
+      </Animated.View>
+    </View>
+  );
+}
+
 // ── Pass indicator dots ───────────────────────────────────────────────────────
 
 function PassDots({ count, needed, theme }: { count: number; needed: number; theme: Theme }) {
@@ -333,10 +374,11 @@ export default function MicWindScreen({ theme, height, active = true }: Props) {
         <Text style={[styles.error, { color: theme.accent }]}>{mic.error}</Text>
       )}
 
+      <PanArrows theme={theme} />
+
       <Text style={[styles.hint, { color: theme.muted }]}>
         Point phone at wind and slowly pan left and right to capture peak signal
       </Text>
-
 
     </ScrollView>
   );
@@ -377,6 +419,8 @@ const styles = StyleSheet.create({
   rangeRow: { flexDirection: 'row', justifyContent: 'space-between', alignSelf: 'stretch', paddingVertical: 10, borderTopWidth: 1, borderTopColor: 'rgba(128,128,128,0.2)' },
   levelLabel: { fontSize: 10, fontFamily: 'Courier', letterSpacing: 2 },
   levelValue: { fontSize: 13, fontFamily: 'Courier', fontWeight: '600', letterSpacing: 1 },
+  panArrowRow: { flexDirection: 'row', alignItems: 'center', gap: 16, marginTop: 16, marginBottom: 8 },
+  panArrowLabel: { fontSize: 10, fontFamily: 'Courier', letterSpacing: 3 },
   error: { fontSize: 12, fontFamily: 'Courier', letterSpacing: 1, marginTop: 10, textAlign: 'center' },
   button: { marginTop: 28, paddingVertical: 14, paddingHorizontal: 40, borderWidth: 2, borderRadius: 4 },
   buttonText: { fontSize: 15, fontFamily: 'Courier', fontWeight: '900', letterSpacing: 4 },
