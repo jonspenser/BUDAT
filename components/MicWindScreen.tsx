@@ -243,7 +243,7 @@ export default function MicWindScreen({ theme, height, active = true }: Props) {
 
   const knotsText = mic.estimatedKnots !== null ? `${Math.round(mic.estimatedKnots)}` : '--';
   const hasDirection = mic.windHeadingDeg !== null;
-  const PASSES_NEEDED = 3;
+  const PASSES_NEEDED = 6;
 
   if (mic.isComplete && mic.result) {
     return (
@@ -321,11 +321,9 @@ export default function MicWindScreen({ theme, height, active = true }: Props) {
           {hasDirection && (
             <View style={styles.passRow}>
               <Text style={[styles.passLabel, { color: theme.muted }]}>
-                {mic.passCount < PASSES_NEEDED
-                  ? `PASS ${mic.passCount + 1} OF ${PASSES_NEEDED} — KEEP SWEEPING`
-                  : 'LOCKING…'}
+                {mic.passCount < PASSES_NEEDED ? 'KEEP SWEEPING' : 'LOCKING…'}
               </Text>
-              <PassDots count={mic.passCount} needed={PASSES_NEEDED} theme={theme} />
+              <PassDots count={Math.floor(mic.passCount / 2)} needed={3} theme={theme} />
             </View>
           )}
         </View>
