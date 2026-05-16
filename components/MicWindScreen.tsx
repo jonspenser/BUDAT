@@ -248,7 +248,7 @@ export default function MicWindScreen({ theme, height, active = true }: Props) {
   if (mic.isComplete && mic.result) {
     return (
       <ScrollView
-        style={[styles.container, { backgroundColor: theme.background, width: W, height,  }]}
+        style={[styles.container, { backgroundColor: theme.background, width: W, height, transform: [{ rotate: '180deg' }] }]}
         contentContainerStyle={[styles.content, { justifyContent: 'center' }]}
       >
         <ResultScreen result={mic.result} theme={theme} onReset={() => { mic.start(); }} />
@@ -258,7 +258,7 @@ export default function MicWindScreen({ theme, height, active = true }: Props) {
 
   return (
     <ScrollView
-      style={[styles.container, { backgroundColor: theme.background, width: W, height,  }]}
+      style={[styles.container, { backgroundColor: theme.background, width: W, height, transform: [{ rotate: '180deg' }] }]}
       contentContainerStyle={styles.content}
     >
       <Text style={[styles.title, { color: theme.accent }]}>ANEMOMETER</Text>
