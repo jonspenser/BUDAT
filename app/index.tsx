@@ -800,7 +800,7 @@ export default function HomeScreen() {
         {pagerHeight > 0 && (
           <>
             {/* Ghost of last page — seen when swiping right on MAP */}
-            <MicWindScreen key="ghost-mic" height={pagerHeight} theme={theme} />
+            <MicWindScreen key="ghost-mic" height={pagerHeight} theme={theme} active={false} />
 
             {/* Page 0 (MAP) */}
             {renderMapTidePage()}

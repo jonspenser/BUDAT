@@ -229,15 +229,17 @@ interface MicWindResult {
 interface Props {
   theme: Theme;
   height?: number;
+  active?: boolean;
 }
 
-export default function MicWindScreen({ theme, height }: Props) {
+export default function MicWindScreen({ theme, height, active = true }: Props) {
   const mic = useMicWind();
 
   useEffect(() => {
+    if (!active) return;
     mic.start();
     return () => { mic.stop(); };
-  }, []);
+  }, [active]);
 
   const knotsText = mic.estimatedKnots !== null ? `${Math.round(mic.estimatedKnots)}` : '--';
   const hasDirection = mic.windHeadingDeg !== null;
@@ -246,7 +248,7 @@ export default function MicWindScreen({ theme, height }: Props) {
   if (mic.isComplete && mic.result) {
     return (
       <ScrollView
-        style={[styles.container, { backgroundColor: theme.background, width: W, height, transform: [{ rotate: '180deg' }] }]}
+        style={[styles.container, { backgroundColor: theme.background, width: W, height,  }]}
         contentContainerStyle={[styles.content, { justifyContent: 'center' }]}
       >
         <ResultScreen result={mic.result} theme={theme} onReset={() => { mic.start(); }} />
@@ -256,7 +258,7 @@ export default function MicWindScreen({ theme, height }: Props) {
 
   return (
     <ScrollView
-      style={[styles.container, { backgroundColor: theme.background, width: W, height, transform: [{ rotate: '180deg' }] }]}
+      style={[styles.container, { backgroundColor: theme.background, width: W, height,  }]}
       contentContainerStyle={styles.content}
     >
       <Text style={[styles.title, { color: theme.accent }]}>ANEMOMETER</Text>
