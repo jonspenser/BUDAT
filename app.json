@@ -19,9 +19,9 @@
         "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "Take a photo of the ocean to attach to your swell log.",
         "NSPhotoLibraryUsageDescription": "Select a photo from your library to attach to your swell log.",
-        "NSMicrophoneUsageDescription": "Record an audio note for your swell log entry."
+        "NSMicrophoneUsageDescription": "Measure wind speed using the microphone as an anemometer."
       },
-      "buildNumber": "7"
+      "buildNumber": "8"
     },
     "android": {
       "adaptiveIcon": {
@@ -50,14 +50,7 @@
     "owner": "jonspenser",
     "sdkVersion": "54.0.0",
     "plugins": [
-      "expo-router",
-      [
-        "expo-notifications",
-        {
-          "icon": "./assets/icon.png",
-          "color": "#0A1628"
-        }
-      ]
+      "expo-router"
     ]
   }
 }
