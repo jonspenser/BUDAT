@@ -21,7 +21,7 @@
         "NSPhotoLibraryUsageDescription": "Select a photo from your library to attach to your swell log.",
         "NSMicrophoneUsageDescription": "Measure wind speed using the microphone as an anemometer."
       },
-      "buildNumber": "9"
+      "buildNumber": "20"
     },
     "android": {
       "adaptiveIcon": {
