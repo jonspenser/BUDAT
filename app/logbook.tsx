@@ -18,7 +18,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
-import { Audio } from 'expo-av';
+// import { Audio } from 'expo-av'; // disabled: expo-av crashes on iOS 26
 import { SwellRecord } from '../hooks/useSwellLog';
 import { useSwellLogContext } from '../contexts/SwellLogContext';
 import { useTheme } from '../hooks/useTheme';
@@ -1037,69 +1037,9 @@ function PinGate({ children }: { children: React.ReactNode }) {
 
 // ── Audio controls ────────────────────────────────────────────────────────────
 
-function AudioControls({ audioUri, onRecorded }: { audioUri?: string; onRecorded: (uri: string) => void }) {
-  const colors = useNbColors();
-  const nb = colors.isNight ? nbNight : nbDay;
-
-  const [recording, setRecording] = useState<Audio.Recording | null>(null);
-  const [playing, setPlaying] = useState(false);
-  const soundRef = useRef<Audio.Sound | null>(null);
-
-  const startRecording = async () => {
-    try {
-      await Audio.requestPermissionsAsync();
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-      const rec = new Audio.Recording();
-      await rec.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
-      await rec.startAsync();
-      setRecording(rec);
-    } catch {}
-  };
-
-  const stopRecording = async () => {
-    if (!recording) return;
-    await recording.stopAndUnloadAsync();
-    const uri = recording.getURI();
-    setRecording(null);
-    if (uri) {
-      const dest = await copyToDocuments(uri, 'm4a').catch(() => uri);
-      onRecorded(dest);
-    }
-  };
-
-  const playAudio = async () => {
-    if (!audioUri) return;
-    try {
-      if (soundRef.current) {
-        await soundRef.current.stopAsync();
-        await soundRef.current.unloadAsync();
-        soundRef.current = null;
-        setPlaying(false);
-        return;
-      }
-      const { sound } = await Audio.Sound.createAsync({ uri: audioUri });
-      soundRef.current = sound;
-      setPlaying(true);
-      await sound.playAsync();
-      sound.setOnPlaybackStatusUpdate(s => {
-        if (s.isLoaded && s.didJustFinish) { setPlaying(false); soundRef.current = null; }
-      });
-    } catch {}
-  };
-
-  return (
-    <View style={{ flexDirection: 'row', gap: 16, paddingVertical: 4 }}>
-      {recording
-        ? <TouchableOpacity onPress={stopRecording}><Text style={[nb.mediaBtn, { color: colors.marginC }]}>■ STOP</Text></TouchableOpacity>
-        : <TouchableOpacity onPress={startRecording}><Text style={nb.mediaBtn}>{audioUri ? '⊙ RE-RECORD' : '⊙ RECORD'}</Text></TouchableOpacity>
-      }
-      {audioUri && (
-        <TouchableOpacity onPress={playAudio}>
-          <Text style={[nb.mediaBtn, playing && { color: colors.marginC }]}>{playing ? '■ STOP' : '▶ PLAY'}</Text>
-        </TouchableOpacity>
-      )}
-    </View>
-  );
+function AudioControls(_props: { audioUri?: string; onRecorded: (uri: string) => void }) {
+  // Audio disabled — expo-av crashes on iOS 26 in TurboModule layer
+  return null;
 }
 
 // ── Swipeable row (left-swipe reveals delete) ─────────────────────────────────
