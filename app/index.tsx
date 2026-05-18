@@ -825,7 +825,7 @@ export default function HomeScreen() {
             <LogbookPage height={pagerHeight} theme={theme} />
 
             {/* Page 4: Mic Wind */}
-            <MicWindScreen key="real-mic" height={pagerHeight} theme={theme} />
+            <MicWindScreen key="real-mic" height={pagerHeight} theme={theme} active={activeScreen === REAL_PAGES - 1} />
 
             {/* Ghost of first page — seen when swiping left on MIC */}
             {renderMapTidePage(true)}
