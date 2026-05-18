@@ -92,9 +92,9 @@ function computeWindHeading(buf: HeadingSample[]): { heading: number | null; swe
 
 const ALPHA      = 0.12;
 const SAMPLE_MS  = 150;
-const WINDOW_MS  = 25_000;  // 25s — enough for 3 slow passes
+const WINDOW_MS  = 45_000;  // 45s — enough for 3 full pans
 const PEAK_ZONE  = 25;      // degrees — within this of peak = "in zone"
-const PASSES_NEEDED = 3;
+const PASSES_NEEDED = 6;    // 6 zone crossings ≈ 3 full back-and-forth pans
 
 export interface MicWindResult {
   heading: number;
