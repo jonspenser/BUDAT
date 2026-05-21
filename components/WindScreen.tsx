@@ -14,10 +14,9 @@ import { formatHawaiiTime, getCardinalDirection } from '../constants/formatters'
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
-/** m/s → knots, formatted as "X.Xkts" */
-function formatKnots(ms: number | null): string {
-  if (ms === null) return '--';
-  return `${(ms * 1.94384).toFixed(1)}kts`;
+function formatKnots(knots: number | null): string {
+  if (knots === null) return '--';
+  return `${knots.toFixed(1)}kts`;
 }
 
 interface WindScreenProps {
@@ -47,9 +46,9 @@ export default function WindScreen({ windData, height, refreshing, onRefresh, th
 
       {NEARSHORE_STATIONS.map((station) => {
         const r = windData[station.id];
-        const wdir = r?.windDirection ?? null;
-        const wspd = r?.windSpeed ?? null;
-        const wgst = r?.windGust ?? null;
+        const wdir = r?.dir ?? null;
+        const wspd = r?.speed ?? null;
+        const wgst = r?.gust ?? null;
         const hasData = wspd !== null || wdir !== null;
 
         return (

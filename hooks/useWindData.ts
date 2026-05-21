@@ -5,6 +5,7 @@ export interface WindReading {
   dir: number | null;    // degrees true
   speed: number | null;  // knots
   gust: number | null;   // knots
+  timestamp: string;
 }
 
 const NDBC_BASE = 'https://www.ndbc.noaa.gov/data/realtime2/';
@@ -27,11 +28,21 @@ function parseWindTxt(text: string, stationId: string): WindReading | null {
 
   const wspd = get('WSPD');
   const gst  = get('GST');
+  const year = get('#YY') ?? get('YY');
+  const month = get('MM');
+  const day = get('DD');
+  const hour = get('hh');
+  const minute = get('mm');
+  const timestamp = year !== null && month !== null && day !== null && hour !== null && minute !== null
+    ? new Date(Date.UTC(year, month - 1, day, hour, minute)).toISOString()
+    : new Date().toISOString();
+
   return {
     stationId,
     dir:   get('WDIR'),
     speed: wspd !== null ? wspd * 1.944 : null,  // m/s → knots
     gust:  gst  !== null ? gst  * 1.944 : null,
+    timestamp,
   };
 }
 
