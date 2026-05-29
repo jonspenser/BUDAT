@@ -4,6 +4,14 @@
   <dict>
     <key>CADisableMinimumFrameDurationOnPhone</key>
     <true/>
+    <key>NSCameraUsageDescription</key>
+    <string>Take a photo of the ocean to attach to your swell log.</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>Select a photo from your library to attach to your swell log.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Uses the microphone to estimate wind speed from ambient sound and to record audio notes for your swell log.</string>
+    <key>NSMotionUsageDescription</key>
+    <string>Uses the compass/motion sensors to detect wind direction while you sweep the phone across the wind line.</string>
     <key>CFBundleDevelopmentRegion</key>
     <string>$(DEVELOPMENT_LANGUAGE)</string>
     <key>CFBundleDisplayName</key>
