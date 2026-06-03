@@ -14,7 +14,7 @@
       "autoIncrement": true,
       "ios": {
         "resourceClass": "m-medium",
-        "buildConfiguration": "Debug"
+        "buildConfiguration": "Release"
       }
     }
   },
