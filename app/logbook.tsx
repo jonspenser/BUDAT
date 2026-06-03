@@ -12,7 +12,6 @@ import {
   Modal,
   ActivityIndicator,
 } from 'react-native';
-import { Swipeable } from 'react-native-gesture-handler';
 import Svg, { Polygon, Path, Circle } from 'react-native-svg';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
@@ -662,6 +661,7 @@ function MoonIcon({ phase, size, color }: { phase?: string | null; size: number;
 
 function RelatedBuoyRows({ rec }: { rec: SwellRecord }) {
   const colors = useNbColors();
+  const nb = colors.isNight ? nbNight : nbDay;
   const { readings, loading } = useRelatedBuoyReadings(rec);
 
   if (loading) {
@@ -675,6 +675,9 @@ function RelatedBuoyRows({ rec }: { rec: SwellRecord }) {
 
   return (
     <>
+      <Text style={nb.sectionLabel}>
+        {rec.swellWindow ? `DIRECTIONAL · ${rec.swellWindow} SWELL` : 'DIRECTIONAL'}
+      </Text>
       {readings.map(r => {
         const hrs = Math.abs(r.offsetHours);
         const hLabel = hrs < 1
@@ -1042,35 +1045,6 @@ function AudioControls(_props: { audioUri?: string; onRecorded: (uri: string) =>
   return null;
 }
 
-// ── Swipeable row (left-swipe reveals delete) ─────────────────────────────────
-
-const DELETE_W = 80;
-
-function SwipeableRow({ onDelete, children }: { onDelete: () => void; children: React.ReactNode }) {
-  const colors = useNbColors();
-
-  const renderDelete = () => (
-    <TouchableOpacity
-      onPress={onDelete}
-      style={{
-        width: DELETE_W,
-        backgroundColor: colors.deleteBtnColor,
-        justifyContent: 'center',
-        alignItems: 'center',
-      }}
-    >
-      <Text style={{ fontFamily: 'Courier', fontWeight: '700', fontSize: 10, color: '#fff', letterSpacing: 2 }}>
-        DELETE
-      </Text>
-    </TouchableOpacity>
-  );
-
-  return (
-    <Swipeable renderRightActions={renderDelete} overshootRight={false}>
-      {children}
-    </Swipeable>
-  );
-}
 
 // ── Logbook content ───────────────────────────────────────────────────────────
 
@@ -1198,13 +1172,7 @@ function LogbookContent({ height }: { height?: number }) {
             const ts = formatLogTimestamp(rec.timestamp);
 
             return (
-              <SwipeableRow
-                key={rec.id}
-                onDelete={() => Alert.alert('Delete Entry', 'Remove this entry from the log?', [
-                  { text: 'Cancel', style: 'cancel' },
-                  { text: 'Delete', style: 'destructive', onPress: () => { deleteRecord(rec.id); setExpandedId(null); } },
-                ])}
-              >
+              <React.Fragment key={rec.id}>
                 <TouchableOpacity
                   onPress={() => setExpandedId(expanded ? null : rec.id)}
                   activeOpacity={0.8}
@@ -1247,9 +1215,19 @@ function LogbookContent({ height }: { height?: number }) {
                       audioUri={rec.audioUri}
                       onRecorded={uri => updateRecord(rec.id, { audioUri: uri })}
                     />
+                    <RelatedBuoyRows rec={rec} />
+                    <TouchableOpacity
+                      onPress={() => Alert.alert('Delete Entry', 'Remove this entry from the log?', [
+                        { text: 'Cancel', style: 'cancel' },
+                        { text: 'Delete', style: 'destructive', onPress: () => { deleteRecord(rec.id); setExpandedId(null); } },
+                      ])}
+                      style={{ alignSelf: 'flex-end', paddingVertical: 6, paddingHorizontal: 4 }}
+                    >
+                      <Text style={nb.deleteBtn}>DELETE ENTRY</Text>
+                    </TouchableOpacity>
                   </View>
                 )}
-              </SwipeableRow>
+              </React.Fragment>
             );
           })}
         </ScrollView>

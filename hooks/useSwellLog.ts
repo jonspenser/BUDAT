@@ -17,6 +17,7 @@ export interface SwellRecord {
   period: number;          // seconds
   directionDeg: number;
   directionLabel: string;  // cardinal
+  swellWindow?: 'N' | 'S' | 'E' | 'W';  // picked at log time — selects which buoys show in the directional line
   speedMph: number;
   windKt?: number | null;
   windGustKt?: number | null;

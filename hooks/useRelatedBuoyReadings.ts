@@ -24,6 +24,20 @@ const RELATED_MAP: Record<string, string[]> = {
   '51213': ['51201', '51208'],   // Hanalei → Waimea, Pauwela
 };
 
+// ── Buoys appropriate to each swell window ────────────────────────────────────
+// When a record has a swellWindow (N/S/E/W) picked at log time, the directional
+// line uses these instead of RELATED_MAP: the matching offshore corner buoys
+// (51001 NW, 51000 NE, 51002 SW, 51004 SE) plus direction-consistent nearshore
+// buoys. The main station is filtered out, and downstream buoys are dropped by
+// the propagation step below, so only buoys that saw the swell first remain.
+
+const DIRECTION_BUOYS: Record<'N' | 'S' | 'E' | 'W', string[]> = {
+  N: ['51001', '51000', '51213', '51201', '51208'], // NW+NE offshore; Hanalei, Waimea, Pauwela (north shores)
+  S: ['51002', '51004', '51205', '51212'],          // SW+SE offshore; Barbers Pt, Lanai (south facing)
+  E: ['51000', '51004', '51208', '51206'],          // NE+SE offshore; Pauwela, Hilo (east facing)
+  W: ['51001', '51002', '51213', '51205'],          // NW+SW offshore; Hanalei, Barbers Pt (west facing)
+};
+
 // ── Buoy coords (from NEARSHORE_STATIONS, duplicated for quick lookup) ────────
 
 const COORDS: Record<string, { lat: number; lon: number }> = {};
@@ -153,7 +167,9 @@ export function useRelatedBuoyReadings(rec: SwellRecord): RelatedBuoyState {
   const [state, setState] = useState<RelatedBuoyState>({ readings: [], loading: false, error: null });
 
   useEffect(() => {
-    const relatedIds = RELATED_MAP[rec.stationId];
+    const relatedIds = rec.swellWindow
+      ? DIRECTION_BUOYS[rec.swellWindow].filter(id => id !== rec.stationId)
+      : RELATED_MAP[rec.stationId];
     if (!relatedIds?.length) return;
 
     const mainCoords = COORDS[rec.stationId];
@@ -209,7 +225,7 @@ export function useRelatedBuoyReadings(rec: SwellRecord): RelatedBuoyState {
     }).catch(err => {
       setState({ readings: [], loading: false, error: String(err) });
     });
-  }, [rec.id]);
+  }, [rec.id, rec.swellWindow]);
 
   return state;
 }

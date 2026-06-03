@@ -497,6 +497,35 @@ function getSnapshotBuoyId(stationId: string): string {
   return STATION_BUOY_MAP[stationId] ?? '51208';
 }
 
+type SwellWindow = 'N' | 'E' | 'S' | 'W';
+
+// Snap a compass bearing (deg the swell is FROM) to the nearest of N/E/S/W
+function nearestCardinal4(deg: number): SwellWindow {
+  const d = ((deg % 360) + 360) % 360;
+  if (d >= 315 || d < 45)  return 'N';
+  if (d < 135)             return 'E';
+  if (d < 225)             return 'S';
+  return 'W';
+}
+
+// Deep-water corner buoys — the dominant one tells us where the swell is from
+const OFFSHORE_CORNER_IDS = ['51001', '51000', '51002', '51004'];
+
+// Look across the offshore corner buoys, pick the one seeing the biggest swell,
+// and return the compass window that swell is coming from (undefined if no data).
+function detectSwellWindow(data: Record<string, BuoyReading | null>): SwellWindow | undefined {
+  let best: { h: number; dir: number } | null = null;
+  for (const id of OFFSHORE_CORNER_IDS) {
+    const r = data[id];
+    if (!r || isOffline(r.timestamp)) continue;
+    const h = r.SwH ?? r.WVHT;
+    const dir = r.SwD ?? r.MWD;
+    if (h == null || dir == null) continue;
+    if (!best || h > best.h) best = { h, dir };
+  }
+  return best ? nearestCardinal4(best.dir) : undefined;
+}
+
 // ── Log Session helpers ───────────────────────────────────────────────────────
 
 const HST_MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
@@ -924,6 +953,7 @@ export default function HomeScreen() {
         id: `${buoyId}-${sessionTs}`,
         timestamp: sessionTs,
         spot: logSpot.trim() || undefined,
+        swellWindow: detectSwellWindow(nearshoreData),
         moonPhase: getMoonPhase(logDate),
         windKt:       windData?.speed ?? null,
         windGustKt:   windData?.gust  ?? null,
@@ -938,7 +968,7 @@ export default function HomeScreen() {
       setSnapshotMsg('SESSION LOGGED');
       setTimeout(() => setSnapshotMsg(''), 2500);
     }
-  }, [selectedStation, nearshoreData, logDate, logSwell, windData, nowTideHeight, nowTideLabel, nowTideState]);
+  }, [selectedStation, nearshoreData, logDate, logSwell, logSpot, windData, nowTideHeight, nowTideLabel, nowTideState]);
 
   // ── Tide swipe (left = next day, right = prev day) ──
   const tideSwipeX = useRef<number | null>(null);

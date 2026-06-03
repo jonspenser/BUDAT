@@ -3,6 +3,7 @@
     "name": "BUDAT",
     "slug": "hawaii-buoy-app",
     "version": "1.0.0",
+    "scheme": "budat",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
