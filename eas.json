@@ -12,7 +12,6 @@
     },
     "production": {
       "autoIncrement": true,
-      "autoSubmit": true,
       "ios": {
         "resourceClass": "m-medium",
         "buildConfiguration": "Release"
