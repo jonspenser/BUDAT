@@ -12,6 +12,7 @@
     },
     "production": {
       "autoIncrement": true,
+      "autoSubmit": true,
       "ios": {
         "resourceClass": "m-medium",
         "buildConfiguration": "Release"
@@ -19,6 +20,11 @@
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": {
+        "appleId": "jonspenser@gmail.com",
+        "ascAppId": "6759576475"
+      }
+    }
   }
 }
