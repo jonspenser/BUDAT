@@ -1,0 +1,13 @@
+diff --git a/node_modules/expo-constants/ios/EXConstantsService.m b/node_modules/expo-constants/ios/EXConstantsService.m
+index f79eaae..e7a3014 100644
+--- a/node_modules/expo-constants/ios/EXConstantsService.m
++++ b/node_modules/expo-constants/ios/EXConstantsService.m
+@@ -41,7 +41,7 @@ - (NSDictionary *)constants
+            @"sessionId": _sessionId,
+            @"executionEnvironment": EXConstantsExecutionEnvironmentBare,
+            @"statusBarHeight": @([self statusBarHeight]),
+-           @"deviceName": [[self class] deviceName],
++           @"deviceName": [[self class] deviceName] ?: @"",
+            @"systemFonts": [self systemFontNames],
+            @"debugMode": @(isDebugXCodeScheme),
+            @"isHeadless": @(NO),
