@@ -8,7 +8,7 @@ import {
   ScrollView,
   Animated,
 } from 'react-native';
-import Svg, { Circle, Path, Line, G } from 'react-native-svg';
+import Svg, { Circle, Path, Line, G, Text as SvgText } from 'react-native-svg';
 import { Theme } from '../constants/colors';
 import { useMicWind, BeaufortInfo } from '../hooks/useMicWind';
 
@@ -39,32 +39,89 @@ interface GaugeProps {
 
 function WindGauge({ beaufortFractional, isRecording, theme }: GaugeProps) {
   const cy = GAUGE_R + 20;
+  const compassR = GAUGE_R * 0.96;
+  const tickOuterR = GAUGE_R * 0.96;
+  const tickInnerR = GAUGE_R * 0.82;
+  const labelR = GAUGE_R * 0.66;
   const fillDeg = Math.min(beaufortFractional / 8, 1) * SWEEP_DEG;
   const endDeg = START_DEG + fillDeg;
-  const needlePt = polarToXY(CX, cy, GAUGE_R * 0.82, START_DEG + fillDeg);
+  const needlePt = polarToXY(CX, cy, GAUGE_R * 0.58, START_DEG + fillDeg);
+  const compassLabels = [
+    { label: 'N', deg: 0 },
+    { label: 'NE', deg: 45 },
+    { label: 'E', deg: 90 },
+    { label: 'SE', deg: 135 },
+    { label: 'S', deg: 180 },
+    { label: 'SW', deg: 225 },
+    { label: 'W', deg: 270 },
+    { label: 'NW', deg: 315 },
+  ];
 
   return (
     <Svg width={W} height={GAUGE_R * 2 + 40}>
-      <Path
-        d={describeArc(CX, cy, GAUGE_R, START_DEG, START_DEG + SWEEP_DEG)}
+      <Circle
+        cx={CX}
+        cy={cy}
+        r={compassR}
         stroke={theme.accentDim}
-        strokeWidth={10}
+        strokeWidth={1}
+        fill="none"
+        opacity={0.65}
+      />
+      {Array.from({ length: 16 }, (_, i) => {
+        const deg = i * 22.5;
+        const is45 = i % 2 === 0;
+        const inner = polarToXY(CX, cy, is45 ? tickInnerR : GAUGE_R * 0.89, deg);
+        const outer = polarToXY(CX, cy, tickOuterR, deg);
+        return (
+          <Line
+            key={`compass-tick-${i}`}
+            x1={inner.x}
+            y1={inner.y}
+            x2={outer.x}
+            y2={outer.y}
+            stroke={is45 ? theme.accent : theme.accentDim}
+            strokeWidth={is45 ? 2 : 1}
+            opacity={is45 ? 0.9 : 0.45}
+          />
+        );
+      })}
+      {compassLabels.map(({ label, deg }) => {
+        const pt = polarToXY(CX, cy, labelR, deg);
+        return (
+          <SvgText
+            key={label}
+            x={pt.x}
+            y={pt.y + 4}
+            fill={theme.muted}
+            fontSize={label.length === 1 ? 13 : 10}
+            fontWeight="700"
+            textAnchor="middle"
+          >
+            {label}
+          </SvgText>
+        );
+      })}
+      <Path
+        d={describeArc(CX, cy, GAUGE_R * 0.5, START_DEG, START_DEG + SWEEP_DEG)}
+        stroke={theme.accentDim}
+        strokeWidth={8}
         fill="none"
         strokeLinecap="round"
       />
       {fillDeg > 0 && (
         <Path
-          d={describeArc(CX, cy, GAUGE_R, START_DEG, endDeg)}
+          d={describeArc(CX, cy, GAUGE_R * 0.5, START_DEG, endDeg)}
           stroke={isRecording ? theme.accent : theme.accentDim}
-          strokeWidth={10}
+          strokeWidth={8}
           fill="none"
           strokeLinecap="round"
         />
       )}
       {Array.from({ length: 9 }, (_, i) => {
         const deg = START_DEG + (i / 8) * SWEEP_DEG;
-        const inner = polarToXY(CX, cy, GAUGE_R - 18, deg);
-        const outer = polarToXY(CX, cy, GAUGE_R + 2, deg);
+        const inner = polarToXY(CX, cy, GAUGE_R * 0.5 - 13, deg);
+        const outer = polarToXY(CX, cy, GAUGE_R * 0.5 + 3, deg);
         return (
           <Path
             key={i}
@@ -78,6 +135,16 @@ function WindGauge({ beaufortFractional, isRecording, theme }: GaugeProps) {
         <Circle cx={needlePt.x} cy={needlePt.y} r={6} fill={theme.accent} />
       )}
       <Circle cx={CX} cy={cy} r={5} fill={theme.accentDim} />
+      <SvgText
+        x={CX}
+        y={cy + GAUGE_R * 0.76}
+        fill={theme.muted}
+        fontSize={10}
+        fontWeight="700"
+        textAnchor="middle"
+      >
+        45° PAN MARKS
+      </SvgText>
     </Svg>
   );
 }
@@ -278,7 +345,6 @@ export default function MicWindScreen({ theme, height, active = true }: Props) {
 
   useEffect(() => {
     if (!active) return;
-    mic.start();
     return () => { mic.stop(); };
   }, [active]);
 
@@ -330,6 +396,16 @@ export default function MicWindScreen({ theme, height, active = true }: Props) {
           {mic.isRecording ? mic.beaufortInfo.label : 'NOT MEASURING'}
         </Text>
       </View>
+
+      {!mic.isRecording && (
+        <TouchableOpacity
+          style={[styles.button, { borderColor: theme.accent, backgroundColor: 'transparent' }]}
+          onPress={mic.start}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.buttonText, { color: theme.accent }]}>START MIC</Text>
+        </TouchableOpacity>
+      )}
 
       {/* ── Direction sweep section ── */}
       {mic.isRecording && (
