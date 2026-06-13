@@ -388,7 +388,7 @@ const pickerStyles = StyleSheet.create({
   divider: { height: 1, opacity: 0.4, marginBottom: 8 },
   row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 4 },
   stationName: { fontFamily: 'Courier', fontWeight: '700', fontSize: 15, letterSpacing: 2 },
-  stationIsland: { fontFamily: 'Courier', fontSize: 10, letterSpacing: 1, marginTop: 2 },
+  stationIsland: { fontFamily: 'Courier', fontSize: 12, letterSpacing: 1, marginTop: 2 },
   check: { fontFamily: 'Courier', fontSize: 16 },
 });
 
@@ -689,8 +689,8 @@ const lsm = StyleSheet.create({
   spotRow:      { marginHorizontal: 20, marginBottom: 16 },
   spotInput:    { fontFamily: 'Courier', fontSize: 13, letterSpacing: 0.5, borderBottomWidth: 1.5, paddingVertical: 6, textAlign: 'center' },
   moonRow:      { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'center', gap: 8, marginBottom: 20, paddingHorizontal: 20 },
-  moonLabel:    { fontFamily: 'Courier', fontSize: 9, letterSpacing: 2 },
-  moonVal:      { fontFamily: 'Courier', fontSize: 11, letterSpacing: 1 },
+  moonLabel:    { fontFamily: 'Courier', fontSize: 11, letterSpacing: 2 },
+  moonVal:      { fontFamily: 'Courier', fontSize: 12, letterSpacing: 1 },
   actions:      { flexDirection: 'row', borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)' },
   actionBtn:    { flex: 1, paddingVertical: 14, alignItems: 'center' },
   actionDivider:{ width: 1 },
@@ -773,7 +773,7 @@ const opm = StyleSheet.create({
   actions:      { flexDirection: 'row', borderTopWidth: 1 },
   actionBtn:    { flex: 1, paddingVertical: 14, alignItems: 'center' },
   actionDivider:{ width: 1 },
-  actionText:   { fontFamily: 'Courier', fontWeight: '700', fontSize: 10, letterSpacing: 2 },
+  actionText:   { fontFamily: 'Courier', fontWeight: '700', fontSize: 11, letterSpacing: 2 },
 });
 
 export default function HomeScreen() {
@@ -919,6 +919,11 @@ export default function HomeScreen() {
     waimeaBay.fromCache || hanalei.fromCache || barberspt.fromCache ||
     hilo.fromCache || lanai.fromCache || swBuoy.fromCache || seBuoy.fromCache;
 
+  // ── Pager state ──
+  const [activeScreen, setActiveScreen] = useState(0);
+  const [pagerHeight, setPagerHeight] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
   // ── Double-tap → open Log Session modal ──
   const handleDoubleTap = useCallback(() => {
     if (pinchActiveRef.current) return;
@@ -983,11 +988,6 @@ export default function HomeScreen() {
     if (dx < 0) setTideOffset(o => Math.min(o + 1, 6));
     else         setTideOffset(o => Math.max(o - 1, 0));
   }, []);
-
-  // ── Pager state ──
-  const [activeScreen, setActiveScreen] = useState(0);
-  const [pagerHeight, setPagerHeight] = useState(0);
-  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const handleScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
     // Virtual layout: [ghost-MIC, MAP, DATA, FORECAST, LOG, MIC, ghost-MAP]
@@ -1086,11 +1086,6 @@ export default function HomeScreen() {
           </View>
         )}
       </View>
-      {!isGhost && (
-        <View style={styles.swipeHint}>
-          <Text style={[styles.swipeText, { color: theme.muted }]}>SWIPE → DATA · LOG · MIC</Text>
-        </View>
-      )}
     </ScrollView>
   );
 
@@ -1266,7 +1261,7 @@ const styles = StyleSheet.create({
     lineHeight: 36,
   },
   headerSubtitle: {
-    fontSize: 10,
+    fontSize: 11,
     fontFamily: 'Courier',
     letterSpacing: 1,
     marginTop: 1,
@@ -1318,7 +1313,7 @@ const styles = StyleSheet.create({
   },
   offlineText: {
     fontFamily: 'Courier',
-    fontSize: 9,
+    fontSize: 11,
     letterSpacing: 2,
   },
 });

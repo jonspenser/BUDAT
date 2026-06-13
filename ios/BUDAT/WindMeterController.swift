@@ -6,8 +6,9 @@ import WindCore
 /// Coordinates WindCore components: audio capture → features → quality → sweep → estimate.
 /// All callbacks fire on the main queue.
 final class WindMeterController {
-    var onSweepUpdate: ((SweepResult) -> Void)?
+    var onSweepUpdate: ((SweepResult, Double) -> Void)?
     var onEstimateUpdate: ((WindEstimate) -> Void)?
+    var onHeadingUpdate: ((Double) -> Void)?
 
     private let sessionConfig = AudioSessionConfigurator()
     private var captureEngine: AudioCaptureEngine?
@@ -41,6 +42,9 @@ final class WindMeterController {
         headingProvider.onHeading = { [weak self] heading, ts in
             self?.currentHeading = heading
             self?.currentTimestamp = ts
+            DispatchQueue.main.async { [weak self] in
+                self?.onHeadingUpdate?(heading)
+            }
         }
         headingProvider.start()
 
@@ -128,7 +132,7 @@ final class WindMeterController {
         let quality = qualityGates.assess(qInputs)
 
         // Build FeatureWindowRecord for buffering/refit
-        let featureVec = FeatureReflection.featureVector(from: features)
+        let featureVec = FeatureReflection.numericVector(from: features)
         let windowRecord = FeatureWindowRecord(
             sessionID: sessionID,
             timeOffsetSeconds: offset,
@@ -152,7 +156,7 @@ final class WindMeterController {
             }
 
             DispatchQueue.main.async { [weak self] in
-                self?.onSweepUpdate?(sweepResult)
+                self?.onSweepUpdate?(sweepResult, heading)
             }
 
             if sweepResult.isLocked {

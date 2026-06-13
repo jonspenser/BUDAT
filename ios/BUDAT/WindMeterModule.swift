@@ -10,7 +10,7 @@ final class WindMeterModule: RCTEventEmitter {
     override static func requiresMainQueueSetup() -> Bool { false }
 
     override func supportedEvents() -> [String]! {
-        ["onSweepUpdate", "onEstimateUpdate", "onError"]
+        ["onSweepUpdate", "onEstimateUpdate", "onHeadingUpdate", "onError"]
     }
 
     override func startObserving() { hasListeners = true }
@@ -20,8 +20,11 @@ final class WindMeterModule: RCTEventEmitter {
                               rejecter reject: @escaping RCTPromiseRejectBlock) {
         DispatchQueue.main.async {
             let ctrl = WindMeterController()
-            ctrl.onSweepUpdate = { [weak self] result in
-                self?.sendSweepUpdate(result)
+            ctrl.onSweepUpdate = { [weak self] result, heading in
+                self?.sendSweepUpdate(result, currentHeadingDegrees: heading)
+            }
+            ctrl.onHeadingUpdate = { [weak self] heading in
+                self?.sendHeadingUpdate(heading)
             }
             ctrl.onEstimateUpdate = { [weak self] estimate in
                 self?.sendEstimateUpdate(estimate)
@@ -64,13 +67,14 @@ final class WindMeterModule: RCTEventEmitter {
 
     // MARK: - Private
 
-    private func sendSweepUpdate(_ result: SweepResult) {
+    private func sendSweepUpdate(_ result: SweepResult, currentHeadingDegrees: Double) {
         guard hasListeners else { return }
         var body: [String: Any] = [
             "guidance": result.guidance.rawValue,
             "isLocked": result.isLocked,
             "coverage": result.coverage,
             "lobeClassification": result.lobeClassification.rawValue,
+            "currentHeadingDegrees": currentHeadingDegrees,
         ]
         if let peak = result.peakHeadingDegrees { body["peakHeadingDegrees"] = peak }
         if let locked = result.lockedHeadingDegrees { body["lockedHeadingDegrees"] = locked }
@@ -87,5 +91,10 @@ final class WindMeterModule: RCTEventEmitter {
         if let lower = estimate.lower95MetersPerSecond { body["lower95MS"] = lower }
         if let upper = estimate.upper95MetersPerSecond { body["upper95MS"] = upper }
         sendEvent(withName: "onEstimateUpdate", body: body)
+    }
+
+    private func sendHeadingUpdate(_ heading: Double) {
+        guard hasListeners else { return }
+        sendEvent(withName: "onHeadingUpdate", body: ["headingDegrees": heading])
     }
 }

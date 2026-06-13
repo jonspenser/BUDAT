@@ -59,5 +59,13 @@ target 'BUDAT' do
       :mac_catalyst_enabled => false,
       :ccache_enabled => ccache_enabled?(podfile_properties),
     )
+    # Xcode 26 beta: fmt's consteval is broken under the beta clang.
+    # The header defines FMT_USE_CONSTEVAL unconditionally, so patch it to 0.
+    fmt_base = File.join(__dir__, 'Pods', 'fmt', 'include', 'fmt', 'base.h')
+    if File.exist?(fmt_base)
+      content = File.read(fmt_base)
+      patched = content.gsub('#  define FMT_USE_CONSTEVAL 1', '#  define FMT_USE_CONSTEVAL 0')
+      File.write(fmt_base, patched) if patched != content
+    end
   end
 end

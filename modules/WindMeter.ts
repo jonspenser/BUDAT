@@ -24,6 +24,7 @@ export interface SweepUpdate {
   isLocked: boolean;
   coverage: number;
   lobeClassification: LobeClassification;
+  currentHeadingDegrees?: number;
   peakHeadingDegrees?: number;
   lockedHeadingDegrees?: number;
 }
@@ -36,14 +37,25 @@ export interface EstimateUpdate {
   status: EstimatorStatus;
 }
 
-const emitter = Platform.OS === 'ios' ? new NativeEventEmitter(WindMeterModule) : null;
+export interface HeadingUpdate {
+  headingDegrees: number;
+}
+
+// WindMeterModule is undefined in Expo Go (no native code) — guard so the
+// import doesn't crash; methods reject with a clear message instead.
+const emitter =
+  Platform.OS === 'ios' && WindMeterModule ? new NativeEventEmitter(WindMeterModule) : null;
+
+const NO_MODULE = 'Wind meter requires a development build (not available in Expo Go)';
 
 export const WindMeter = {
   startMeasuring(): Promise<void> {
+    if (!WindMeterModule) return Promise.reject(new Error(NO_MODULE));
     return WindMeterModule.startMeasuring();
   },
 
   stopMeasuring(): Promise<void> {
+    if (!WindMeterModule) return Promise.resolve();
     return WindMeterModule.stopMeasuring();
   },
 
@@ -53,6 +65,7 @@ export const WindMeter = {
     readingType: 'sustained' | 'gust' | 'average',
     directionDegrees?: number | null
   ): Promise<void> {
+    if (!WindMeterModule) return Promise.reject(new Error(NO_MODULE));
     return WindMeterModule.submitCorrection(speedMS, unit, readingType, directionDegrees ?? null);
   },
 
@@ -62,6 +75,10 @@ export const WindMeter = {
 
   onEstimateUpdate(handler: (update: EstimateUpdate) => void) {
     return emitter?.addListener('onEstimateUpdate', handler);
+  },
+
+  onHeadingUpdate(handler: (update: HeadingUpdate) => void) {
+    return emitter?.addListener('onHeadingUpdate', handler);
   },
 
   onError(handler: (err: { message: string }) => void) {
