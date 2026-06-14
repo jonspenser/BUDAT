@@ -147,8 +147,8 @@ function parseNOAASpecData(text: string): SpecRow[] {
   return rows;
 }
 
-// Find the closest spec row within a 30-minute window
-const SPEC_TOLERANCE_MS = 30 * 60 * 1000;
+// Find the closest spec row within a 60-minute window
+const SPEC_TOLERANCE_MS = 60 * 60 * 1000;
 function closestSpecRow(rows: SpecRow[], target: Date): SpecRow | null {
   let best: SpecRow | null = null;
   let bestDiff = SPEC_TOLERANCE_MS + 1;
@@ -187,18 +187,23 @@ export async function fetchBuoyRows(stationId: string): Promise<BuoyReading[]> {
   const rows = parseNOAAStandardData(txtText, stationId);
   if (rows.length === 0) throw new Error('Parse error');
 
-  // Merge spec data if available — use closest-match within 30 min
+  // Merge spec data if available — use closest-match within 60 min;
+  // fall back to newest spec row when .txt timestamp is ahead of all spec rows
   if (specRes?.ok) {
     const specText = await specRes.text();
     const specRows = parseNOAASpecData(specText);
     for (const row of rows) {
-      const spec = closestSpecRow(specRows, row.timestamp);
+      let spec = closestSpecRow(specRows, row.timestamp);
+      if (!spec && specRows.length > 0 && row.timestamp > specRows[0].ts) {
+        spec = specRows[0];
+      }
       if (spec) {
         row.SwH  = spec.SwH;
         row.SwP  = spec.SwP;
         row.SwD  = spec.SwD;
         row.WWH  = spec.WWH;
         if (spec.MWD !== null) row.MWD = spec.MWD;
+        row.timestamp = spec.ts;
       }
     }
   }
