@@ -483,18 +483,18 @@ function isHawaiiWinter(): boolean {
 
 // Map wind/tide station → the most relevant nearshore buoy for snapshots
 const STATION_BUOY_MAP: Record<string, string> = {
-  kahului:    '51208', // Pauwela
+  kahului:    '51205', // Pauwela
   hilo:       '51206', // Hilo
-  nawiliwili: '51213', // Hanalei
+  nawiliwili: '51208', // Hanalei
   kawaihae:   '51206', // Hilo (closest Big Island buoy)
-  lanai:      '51212', // Lanai buoy
+  lanai:      '51213', // Lanai buoy
 };
 
 function getSnapshotBuoyId(stationId: string): string {
   if (stationId === 'honolulu') {
-    return isHawaiiWinter() ? '51201' : '51205';
+    return isHawaiiWinter() ? '51201' : '51212'; // winter: Waimea Bay; summer: Barbers Point
   }
-  return STATION_BUOY_MAP[stationId] ?? '51208';
+  return STATION_BUOY_MAP[stationId] ?? '51213';
 }
 
 type SwellWindow = 'N' | 'E' | 'S' | 'W';
@@ -787,24 +787,24 @@ export default function HomeScreen() {
   // ── Wave data ──
   const nwBuoy    = useBuoyData('51001');
   const neBuoy    = useBuoyData('51000');
-  const hanalei   = useBuoyData('51213');
+  const hanalei   = useBuoyData('51208');
   const waimeaBay = useBuoyData('51201');
-  const pauwela   = useBuoyData('51208');
-  const barberspt = useBuoyData('51205');
+  const pauwela   = useBuoyData('51205');
+  const barberspt = useBuoyData('51212');
   const hilo      = useBuoyData('51206');
-  const lanai     = useBuoyData('51212');
+  const lanai     = useBuoyData('51213');
   const swBuoy    = useBuoyData('51002');
   const seBuoy    = useBuoyData('51004');
 
   const nearshoreData: Record<string, BuoyReading | null> = {
     '51001': nwBuoy.data,
     '51000': neBuoy.data,
-    '51213': hanalei.data,
+    '51208': hanalei.data,
     '51201': waimeaBay.data,
-    '51208': pauwela.data,
-    '51205': barberspt.data,
+    '51205': pauwela.data,
+    '51212': barberspt.data,
     '51206': hilo.data,
-    '51212': lanai.data,
+    '51213': lanai.data,
     '51002': swBuoy.data,
     '51004': seBuoy.data,
   };
@@ -812,12 +812,12 @@ export default function HomeScreen() {
   const nearshoreHistory: Record<string, BuoyReading[]> = {
     '51001': nwBuoy.history,
     '51000': neBuoy.history,
-    '51213': hanalei.history,
+    '51208': hanalei.history,
     '51201': waimeaBay.history,
-    '51208': pauwela.history,
-    '51205': barberspt.history,
+    '51205': pauwela.history,
+    '51212': barberspt.history,
     '51206': hilo.history,
-    '51212': lanai.history,
+    '51213': lanai.history,
     '51002': swBuoy.history,
     '51004': seBuoy.history,
   };
