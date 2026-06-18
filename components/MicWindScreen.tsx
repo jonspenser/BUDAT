@@ -1,16 +1,27 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
+  TextInput,
   StyleSheet,
   Dimensions,
   ScrollView,
-  Animated,
+  Platform,
 } from 'react-native';
 import Svg, { Circle, Path, Line, G, Text as SvgText } from 'react-native-svg';
+import * as Haptics from 'expo-haptics';
 import { Theme } from '../constants/colors';
-import { useMicWind, BeaufortInfo } from '../hooks/useMicWind';
+import { headingToCardinal } from '../hooks/useMicWind';
+import {
+  WindMeter,
+  msToKnots,
+  knotsToMs,
+  SweepUpdate,
+  EstimateUpdate,
+  HeadingUpdate,
+  SweepGuidance,
+} from '../modules/WindMeter';
 
 const { width: W } = Dimensions.get('window');
 const GAUGE_R = W * 0.38;
@@ -18,6 +29,32 @@ const CX = W / 2;
 
 const START_DEG = 210;
 const SWEEP_DEG = 240;
+
+// Beaufort lower bounds in knots: B0..B8
+const BF_KNOTS_MIN = [0, 1, 4, 7, 11, 17, 22, 28, 34];
+const BF_LABELS = ['CALM', 'LIGHT AIR', 'LIGHT BREEZE', 'GENTLE', 'MODERATE', 'FRESH', 'STRONG', 'NEAR GALE', 'GALE'];
+
+function knotsToBeaufortFractional(knots: number): number {
+  if (knots <= 0) return 0;
+  for (let i = 8; i >= 0; i--) {
+    if (knots >= BF_KNOTS_MIN[i]) {
+      if (i === 8) return 8;
+      const lo = BF_KNOTS_MIN[i];
+      const hi = BF_KNOTS_MIN[i + 1];
+      return i + (knots - lo) / (hi - lo);
+    }
+  }
+  return 0;
+}
+
+const GUIDANCE_LABEL: Record<SweepGuidance, string> = {
+  keepSweeping: 'KEEP SWEEPING',
+  rotateLeft: 'ROTATE LEFT',
+  rotateRight: 'ROTATE RIGHT',
+  hold: 'HOLD STEADY',
+  locked: 'LOCKED',
+  noLock: 'NO LOCK — TRY AGAIN',
+};
 
 function polarToXY(cx: number, cy: number, r: number, deg: number) {
   const rad = ((deg - 90) * Math.PI) / 180;
@@ -135,16 +172,6 @@ function WindGauge({ beaufortFractional, isRecording, theme }: GaugeProps) {
         <Circle cx={needlePt.x} cy={needlePt.y} r={6} fill={theme.accent} />
       )}
       <Circle cx={CX} cy={cy} r={5} fill={theme.accentDim} />
-      <SvgText
-        x={CX}
-        y={cy + GAUGE_R * 0.76}
-        fill={theme.muted}
-        fontSize={10}
-        fontWeight="700"
-        textAnchor="middle"
-      >
-        45° PAN MARKS
-      </SvgText>
     </Svg>
   );
 }
@@ -173,27 +200,45 @@ function BeaufortBar({ beaufortFractional, isRecording, theme }: GaugeProps) {
   );
 }
 
-// Mini compass rose showing wind direction arrow
-function CompassRose({ headingDeg, sweepDeg, theme }: { headingDeg: number | null; sweepDeg: number; theme: Theme }) {
+// Mini compass rose showing wind direction arrow + live phone heading
+function CompassRose({
+  windDeg,
+  phoneDeg,
+  coverage,
+  theme,
+}: {
+  windDeg: number | null;
+  phoneDeg: number | null;
+  coverage: number;
+  theme: Theme;
+}) {
   const SIZE = 100;
   const cx = SIZE / 2;
   const cy = SIZE / 2;
   const r = SIZE * 0.42;
 
-  // Sweep arc: show the range scanned (centred on detected heading or 0°)
-  const sweepFraction = Math.min(sweepDeg / 180, 1);
-  const hasDir = headingDeg !== null;
+  const hasDir = windDeg !== null;
+  const sweepDeg = Math.min(coverage, 1) * 180;
 
   // Arrow pointing to wind-from direction
-  const arrowRad = headingDeg !== null ? ((headingDeg - 90) * Math.PI) / 180 : -Math.PI / 2;
+  const arrowRad = windDeg !== null ? ((windDeg - 90) * Math.PI) / 180 : -Math.PI / 2;
   const arrowTip = { x: cx + r * 0.72 * Math.cos(arrowRad), y: cy + r * 0.72 * Math.sin(arrowRad) };
   const arrowBase = { x: cx - r * 0.4 * Math.cos(arrowRad), y: cy - r * 0.4 * Math.sin(arrowRad) };
 
   // Sweep arc centred on detected heading (or north if none)
-  const sweepCenter = headingDeg ?? 0;
-  const halfSweep = (sweepDeg / 2);
+  const sweepCenter = windDeg ?? 0;
+  const halfSweep = sweepDeg / 2;
   const arcStart = sweepCenter - halfSweep;
   const arcEnd = sweepCenter + halfSweep;
+
+  // Live phone heading tick on the outer ring
+  const phoneTick =
+    phoneDeg !== null
+      ? {
+          inner: polarToXY(cx, cy, r * 0.86, phoneDeg),
+          outer: polarToXY(cx, cy, r * 1.06, phoneDeg),
+        }
+      : null;
 
   const cardinals = [
     { label: 'N', deg: 0 }, { label: 'E', deg: 90 },
@@ -206,7 +251,7 @@ function CompassRose({ headingDeg, sweepDeg, theme }: { headingDeg: number | nul
       <Circle cx={cx} cy={cy} r={r} stroke={theme.accentDim} strokeWidth={1} fill="none" />
 
       {/* Sweep arc (how much the user has rotated) */}
-      {sweepFraction > 0.05 && (
+      {sweepDeg > 10 && (
         <Path
           d={describeArc(cx, cy, r * 0.78, arcStart, arcEnd)}
           stroke={hasDir ? theme.accent : theme.muted}
@@ -222,13 +267,24 @@ function CompassRose({ headingDeg, sweepDeg, theme }: { headingDeg: number | nul
         const rad = ((deg - 90) * Math.PI) / 180;
         const outer = { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
         const inner = { x: cx + r * 0.82 * Math.cos(rad), y: cy + r * 0.82 * Math.sin(rad) };
-        const textPos = { x: cx + r * 1.18 * Math.cos(rad), y: cy + r * 1.18 * Math.sin(rad) };
         return (
           <G key={label}>
             <Line x1={inner.x} y1={inner.y} x2={outer.x} y2={outer.y} stroke={theme.accentDim} strokeWidth={1.5} />
           </G>
         );
       })}
+
+      {/* Live phone heading tick */}
+      {phoneTick && (
+        <Line
+          x1={phoneTick.inner.x}
+          y1={phoneTick.inner.y}
+          x2={phoneTick.outer.x}
+          y2={phoneTick.outer.y}
+          stroke={theme.textPrimary}
+          strokeWidth={2}
+        />
+      )}
 
       {/* Wind direction arrow */}
       {hasDir && (
@@ -246,74 +302,31 @@ function CompassRose({ headingDeg, sweepDeg, theme }: { headingDeg: number | nul
   );
 }
 
-// ── Pan arrows ────────────────────────────────────────────────────────────────
-
-function PanArrows({ theme }: { theme: Theme }) {
-  const anim = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(anim, { toValue: 1, duration: 700, useNativeDriver: true }),
-        Animated.delay(150),
-        Animated.timing(anim, { toValue: 0, duration: 700, useNativeDriver: true }),
-        Animated.delay(150),
-      ])
-    ).start();
-  }, []);
-
-  const leftOpacity  = anim.interpolate({ inputRange: [0, 1], outputRange: [1, 0.15] });
-  const rightOpacity = anim.interpolate({ inputRange: [0, 1], outputRange: [0.15, 1] });
-
-  const arrowStyle = { width: 0, height: 0 };
-
-  return (
-    <View style={styles.panArrowRow}>
-      <Animated.View style={{ opacity: leftOpacity }}>
-        <Svg width={28} height={28}>
-          <Path d="M20 4 L6 14 L20 24 Z" fill={theme.accent} />
-        </Svg>
-      </Animated.View>
-
-      <Text style={[styles.panArrowLabel, { color: theme.muted }]}>PAN</Text>
-
-      <Animated.View style={{ opacity: rightOpacity }}>
-        <Svg width={28} height={28}>
-          <Path d="M8 4 L22 14 L8 24 Z" fill={theme.accent} />
-        </Svg>
-      </Animated.View>
-    </View>
-  );
-}
-
-// ── Pass indicator dots ───────────────────────────────────────────────────────
-
-function PassDots({ count, needed, theme }: { count: number; needed: number; theme: Theme }) {
-  return (
-    <View style={styles.passDotsRow}>
-      {Array.from({ length: needed }).map((_, i) => (
-        <View
-          key={i}
-          style={[
-            styles.passDot,
-            { backgroundColor: i < count ? theme.accent : theme.accentDim },
-          ]}
-        />
-      ))}
-    </View>
-  );
-}
-
 // ── Result screen ─────────────────────────────────────────────────────────────
 
-function ResultScreen({ result, theme, onReset }: { result: NonNullable<MicWindResult>; theme: Theme; onReset: () => void }) {
-  const hdg = String(Math.round(result.heading)).padStart(3, '0');
+function ResultScreen({
+  headingDeg,
+  knots,
+  theme,
+  onReset,
+  onCalibrate,
+}: {
+  headingDeg: number | null;
+  knots: number | null;
+  theme: Theme;
+  onReset: () => void;
+  onCalibrate: () => void;
+}) {
+  const hdg = headingDeg !== null ? String(Math.round(headingDeg)).padStart(3, '0') : '---';
+  const cardinal = headingDeg !== null ? headingToCardinal(headingDeg) : '--';
   return (
     <View style={styles.resultContainer}>
       <Text style={[styles.resultDeg, { color: theme.accent }]}>{hdg}°</Text>
-      <Text style={[styles.resultCard, { color: theme.accent }]}>{result.cardinal}</Text>
+      <Text style={[styles.resultCard, { color: theme.accent }]}>{cardinal}</Text>
       <View style={[styles.resultDivider, { backgroundColor: theme.accentDim }]} />
-      <Text style={[styles.resultKts, { color: theme.textPrimary }]}>{result.knots} KT</Text>
+      <Text style={[styles.resultKts, { color: theme.textPrimary }]}>
+        {knots !== null ? Math.round(knots) : '--'} KT
+      </Text>
       <TouchableOpacity
         style={[styles.button, { borderColor: theme.accent, backgroundColor: 'transparent', marginTop: 48 }]}
         onPress={onReset}
@@ -321,18 +334,20 @@ function ResultScreen({ result, theme, onReset }: { result: NonNullable<MicWindR
       >
         <Text style={[styles.buttonText, { color: theme.accent }]}>MEASURE AGAIN</Text>
       </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.button, styles.buttonSecondary, { borderColor: theme.accentDim }]}
+        onPress={onCalibrate}
+        activeOpacity={0.7}
+      >
+        <Text style={[styles.buttonText, { color: theme.accentDim, fontSize: 12 }]}>CALIBRATE</Text>
+      </TouchableOpacity>
     </View>
   );
 }
 
 // ── Main screen ───────────────────────────────────────────────────────────────
 
-interface MicWindResult {
-  heading: number;
-  cardinal: string;
-  knots: number;
-  beaufortInfo: BeaufortInfo;
-}
+type MeasureState = 'idle' | 'sweeping' | 'locked' | 'calibrating';
 
 interface Props {
   theme: Theme;
@@ -341,24 +356,219 @@ interface Props {
 }
 
 export default function MicWindScreen({ theme, height, active = true }: Props) {
-  const mic = useMicWind();
+  const [measureState, setMeasureState] = useState<MeasureState>('idle');
+  const [sweep, setSweep] = useState<SweepUpdate | null>(null);
+  const [estimate, setEstimate] = useState<EstimateUpdate | null>(null);
+  const [liveHeading, setLiveHeading] = useState<HeadingUpdate | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [correctionInput, setCorrectionInput] = useState('');
+  const [directionInput, setDirectionInput] = useState('');
 
+  const trainingRef = useRef(false);
+  const estimateRef = useRef<EstimateUpdate | null>(null);
+  const sweepRef = useRef<SweepUpdate | null>(null);
+  const subsRef = useRef<{ remove: () => void }[]>([]);
+
+  const stopListeners = useCallback(() => {
+    subsRef.current.forEach(s => s?.remove?.());
+    subsRef.current = [];
+  }, []);
+
+  const stopMeasuring = useCallback(async () => {
+    stopListeners();
+    try { await WindMeter.stopMeasuring(); } catch {}
+  }, [stopListeners]);
+
+  const startMeasurement = useCallback(async (training: boolean) => {
+    if (Platform.OS !== 'ios') {
+      setError('iOS only');
+      return;
+    }
+    trainingRef.current = training;
+    setError(null);
+    setSweep(null);
+    setEstimate(null);
+    setLiveHeading(null);
+    estimateRef.current = null;
+    sweepRef.current = null;
+    setMeasureState('sweeping');
+
+    const headingSub = WindMeter.onHeadingUpdate(update => setLiveHeading(update));
+    const sweepSub = WindMeter.onSweepUpdate(update => {
+      sweepRef.current = update;
+      setSweep(update);
+      if (update.isLocked) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+        if (trainingRef.current) {
+          const est = estimateRef.current;
+          setCorrectionInput(est?.speedMS != null ? msToKnots(est.speedMS).toFixed(1) : '');
+          setDirectionInput(
+            update.lockedHeadingDegrees != null
+              ? String(Math.round(update.lockedHeadingDegrees))
+              : update.peakHeadingDegrees != null
+                ? String(Math.round(update.peakHeadingDegrees))
+                : ''
+          );
+          setMeasureState('calibrating');
+        } else {
+          setMeasureState('locked');
+        }
+      }
+    });
+    const estimateSub = WindMeter.onEstimateUpdate(update => {
+      estimateRef.current = update;
+      setEstimate(update);
+    });
+    const errorSub = WindMeter.onError(err => {
+      setError(err?.message ?? 'Microphone error');
+      setMeasureState('idle');
+    });
+    subsRef.current = [headingSub, sweepSub, estimateSub, errorSub].filter(Boolean) as { remove: () => void }[];
+
+    try {
+      await WindMeter.startMeasuring();
+    } catch (e: any) {
+      stopListeners();
+      setMeasureState('idle');
+      setError(e?.message ?? 'Could not start microphone');
+    }
+  }, [stopListeners]);
+
+  const handleStop = useCallback(async () => {
+    await stopMeasuring();
+    trainingRef.current = false;
+    setMeasureState('idle');
+  }, [stopMeasuring]);
+
+  const handleCalibrateFromResult = useCallback(() => {
+    const est = estimateRef.current;
+    const sw = sweepRef.current;
+    setCorrectionInput(est?.speedMS != null ? msToKnots(est.speedMS).toFixed(1) : '');
+    setDirectionInput(
+      sw?.lockedHeadingDegrees != null
+        ? String(Math.round(sw.lockedHeadingDegrees))
+        : sw?.peakHeadingDegrees != null
+          ? String(Math.round(sw.peakHeadingDegrees))
+          : ''
+    );
+    setMeasureState('calibrating');
+  }, []);
+
+  const handleSubmitCorrection = useCallback(async () => {
+    const val = parseFloat(correctionInput);
+    if (isNaN(val) || val <= 0) {
+      setError('Enter a valid wind speed');
+      return;
+    }
+    const dir = directionInput.trim() ? parseFloat(directionInput) : null;
+    if (dir !== null && (isNaN(dir) || dir < 0 || dir > 360)) {
+      setError('Direction must be 0–360°');
+      return;
+    }
+    setError(null);
+    try {
+      await WindMeter.submitCorrection(knotsToMs(val), 'knots', 'sustained', dir === 360 ? 0 : dir);
+    } catch {}
+    trainingRef.current = false;
+    await stopMeasuring();
+    setMeasureState('idle');
+  }, [correctionInput, directionInput, stopMeasuring]);
+
+  const handleCancelCalibrate = useCallback(async () => {
+    trainingRef.current = false;
+    await stopMeasuring();
+    setMeasureState('idle');
+  }, [stopMeasuring]);
+
+  // Stop when the pager page is no longer active, and on unmount
   useEffect(() => {
-    if (!active) return;
-    return () => { mic.stop(); };
+    if (!active && measureState !== 'idle') {
+      handleStop();
+    }
   }, [active]);
 
-  const knotsText = mic.estimatedKnots !== null ? `${Math.round(mic.estimatedKnots)}` : '--';
-  const hasDirection = mic.windHeadingDeg !== null;
-  const PASSES_NEEDED = 6;
+  useEffect(() => {
+    return () => {
+      stopListeners();
+      WindMeter.stopMeasuring().catch(() => {});
+    };
+  }, [stopListeners]);
 
-  if (mic.isComplete && mic.result) {
+  const isRecording = measureState === 'sweeping';
+  const estimateKnots = estimate?.speedMS != null ? msToKnots(estimate.speedMS) : null;
+  const beaufortFractional = estimateKnots !== null ? knotsToBeaufortFractional(estimateKnots) : 0;
+  const bfIndex = Math.max(0, Math.min(8, Math.round(beaufortFractional)));
+  const knotsText = isRecording && estimateKnots !== null ? `${Math.round(estimateKnots)}` : '--';
+  const windDeg = sweep?.lockedHeadingDegrees ?? sweep?.peakHeadingDegrees ?? null;
+  const phoneDeg = liveHeading?.headingDegrees ?? sweep?.currentHeadingDegrees ?? null;
+  const lower = estimate?.lower95MS != null ? Math.round(msToKnots(estimate.lower95MS)) : null;
+  const upper = estimate?.upper95MS != null ? Math.round(msToKnots(estimate.upper95MS)) : null;
+
+  if (measureState === 'locked') {
     return (
       <ScrollView
         style={[styles.container, { backgroundColor: theme.background, width: W, height, transform: [{ rotate: '180deg' }] }]}
         contentContainerStyle={[styles.content, { justifyContent: 'center' }]}
       >
-        <ResultScreen result={mic.result} theme={theme} onReset={() => { mic.start(); }} />
+        <ResultScreen
+          headingDeg={windDeg}
+          knots={estimateKnots}
+          theme={theme}
+          onReset={() => { startMeasurement(false); }}
+          onCalibrate={handleCalibrateFromResult}
+        />
+      </ScrollView>
+    );
+  }
+
+  if (measureState === 'calibrating') {
+    return (
+      <ScrollView
+        style={[styles.container, { backgroundColor: theme.background, width: W, height, transform: [{ rotate: '180deg' }] }]}
+        contentContainerStyle={[styles.content, { justifyContent: 'center' }]}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Text style={[styles.calLabel, { color: theme.muted }]}>APP GUESS</Text>
+        <Text style={[styles.calGuess, { color: theme.textPrimary }]}>
+          {estimateKnots !== null ? estimateKnots.toFixed(1) : '--'} KT · {windDeg !== null ? `${Math.round(windDeg)}°` : '--°'}
+        </Text>
+
+        <Text style={[styles.calLabel, { color: theme.muted, marginTop: 24 }]}>ACTUAL WIND SPEED (KT)</Text>
+        <TextInput
+          style={[styles.calInput, { color: theme.textPrimary, borderColor: theme.accentDim }]}
+          value={correctionInput}
+          onChangeText={setCorrectionInput}
+          keyboardType="decimal-pad"
+          placeholder="0.0"
+          placeholderTextColor={theme.muted}
+        />
+
+        <Text style={[styles.calLabel, { color: theme.muted, marginTop: 16 }]}>ACTUAL DIRECTION (°)</Text>
+        <TextInput
+          style={[styles.calInput, { color: theme.textPrimary, borderColor: theme.accentDim }]}
+          value={directionInput}
+          onChangeText={setDirectionInput}
+          keyboardType="number-pad"
+          placeholder="0–360"
+          placeholderTextColor={theme.muted}
+        />
+
+        {error && <Text style={[styles.error, { color: theme.accent }]}>{error}</Text>}
+
+        <TouchableOpacity
+          style={[styles.button, { borderColor: theme.accent, marginTop: 28 }]}
+          onPress={handleSubmitCorrection}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.buttonText, { color: theme.accent }]}>SUBMIT</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.button, styles.buttonSecondary, { borderColor: theme.accentDim }]}
+          onPress={handleCancelCalibrate}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.buttonText, { color: theme.accentDim, fontSize: 12 }]}>CANCEL</Text>
+        </TouchableOpacity>
       </ScrollView>
     );
   }
@@ -371,9 +581,9 @@ export default function MicWindScreen({ theme, height, active = true }: Props) {
       <Text style={[styles.title, { color: theme.accent }]}>ANEMOMETER</Text>
       <View style={[styles.divider, { backgroundColor: theme.accent }]} />
 
-      <WindGauge beaufortFractional={mic.beaufortFractional} isRecording={mic.isRecording} theme={theme} />
+      <WindGauge beaufortFractional={beaufortFractional} isRecording={isRecording} theme={theme} />
 
-      <BeaufortBar beaufortFractional={mic.beaufortFractional} isRecording={mic.isRecording} theme={theme} />
+      <BeaufortBar beaufortFractional={beaufortFractional} isRecording={isRecording} theme={theme} />
 
       <View style={styles.bfLabelRow}>
         <Text style={[styles.bfLabelEdge, { color: theme.muted }]}>B0</Text>
@@ -382,79 +592,87 @@ export default function MicWindScreen({ theme, height, active = true }: Props) {
 
       {/* Speed readout */}
       <View style={styles.readout}>
-        <Text style={[styles.speedValue, { color: mic.isRecording ? theme.textPrimary : theme.accentDim }]}>
+        <Text style={[styles.speedValue, { color: isRecording ? theme.textPrimary : theme.accentDim }]}>
           {knotsText}
         </Text>
         <Text style={[styles.speedUnit, { color: theme.muted }]}>KT</Text>
       </View>
 
+      {isRecording && lower !== null && upper !== null && (
+        <Text style={[styles.rangeText, { color: theme.muted }]}>{lower} – {upper} KT</Text>
+      )}
+
       <View style={styles.beaufortLabelWrap}>
         <Text style={[styles.beaufortNumber, { color: theme.accent }]}>
-          {mic.isRecording ? `B${mic.beaufortInfo.number}` : '--'}
+          {isRecording ? `B${bfIndex}` : '--'}
         </Text>
         <Text style={[styles.beaufortLabel, { color: theme.textPrimary }]}>
-          {mic.isRecording ? mic.beaufortInfo.label : 'NOT MEASURING'}
+          {isRecording ? BF_LABELS[bfIndex] : 'NOT MEASURING'}
         </Text>
       </View>
 
-      {!mic.isRecording && (
-        <TouchableOpacity
-          style={[styles.button, { borderColor: theme.accent, backgroundColor: 'transparent' }]}
-          onPress={mic.start}
-          activeOpacity={0.7}
-        >
-          <Text style={[styles.buttonText, { color: theme.accent }]}>START MIC</Text>
-        </TouchableOpacity>
+      {measureState === 'idle' && (
+        <>
+          <TouchableOpacity
+            style={[styles.button, { borderColor: theme.accent, backgroundColor: 'transparent' }]}
+            onPress={() => startMeasurement(false)}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.buttonText, { color: theme.accent }]}>TAKE MEASUREMENT</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.button, styles.buttonSecondary, { borderColor: theme.accentDim }]}
+            onPress={() => startMeasurement(true)}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.buttonText, { color: theme.accentDim, fontSize: 12 }]}>CALIBRATE</Text>
+          </TouchableOpacity>
+        </>
       )}
 
       {/* ── Direction sweep section ── */}
-      {mic.isRecording && (
+      {isRecording && (
         <View style={[styles.dirSection, { borderTopColor: theme.accentDim }]}>
           <Text style={[styles.dirTitle, { color: theme.accent }]}>WIND DIRECTION</Text>
 
           <View style={styles.dirBody}>
-            <CompassRose headingDeg={mic.windHeadingDeg} sweepDeg={mic.sweepDeg} theme={theme} />
+            <CompassRose windDeg={windDeg} phoneDeg={phoneDeg} coverage={sweep?.coverage ?? 0} theme={theme} />
 
             <View style={styles.dirRight}>
-              {hasDirection ? (
+              {windDeg !== null ? (
                 <>
-                  <Text style={[styles.dirCardinal, { color: theme.accent }]}>{mic.windCardinal}</Text>
+                  <Text style={[styles.dirCardinal, { color: theme.accent }]}>{headingToCardinal(windDeg)}</Text>
                   <Text style={[styles.dirDeg, { color: theme.textPrimary }]}>
-                    {Math.round(mic.windHeadingDeg!)}°
+                    {Math.round(windDeg)}°
                   </Text>
                   <Text style={[styles.dirLabel, { color: theme.muted }]}>FROM</Text>
                 </>
               ) : (
                 <Text style={[styles.dirPrompt, { color: theme.muted }]}>
-                  {mic.sweepDeg < 15
-                    ? 'Slowly sweep\nphone across\nwind line'
-                    : `Sweep: ${Math.round(mic.sweepDeg)}°\nKeep sweeping…`}
+                  {GUIDANCE_LABEL[sweep?.guidance ?? 'keepSweeping']}
                 </Text>
               )}
             </View>
           </View>
 
-          {/* Pass counter */}
-          {hasDirection && (
-            <View style={styles.passRow}>
-              <Text style={[styles.passLabel, { color: theme.muted }]}>
-                {mic.passCount < PASSES_NEEDED ? 'KEEP SWEEPING' : 'LOCKING…'}
-              </Text>
-              <PassDots count={Math.floor(mic.passCount / 2)} needed={3} theme={theme} />
-            </View>
-          )}
+          <Text style={[styles.guidanceText, { color: theme.muted }]}>
+            {GUIDANCE_LABEL[sweep?.guidance ?? 'keepSweeping']}
+            {sweep && !sweep.isLocked ? ` · ${Math.round((sweep.coverage ?? 0) * 100)}%` : ''}
+          </Text>
+
+          <TouchableOpacity
+            style={[styles.button, styles.buttonSecondary, { borderColor: theme.accentDim, alignSelf: 'center' }]}
+            onPress={handleStop}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.buttonText, { color: theme.accentDim, fontSize: 12 }]}>STOP</Text>
+          </TouchableOpacity>
         </View>
       )}
 
-      {mic.error && (
-        <Text style={[styles.error, { color: theme.accent }]}>{mic.error}</Text>
+      {error && (
+        <Text style={[styles.error, { color: theme.accent }]}>{error}</Text>
       )}
-
-      <PanArrows theme={theme} />
-
-      <Text style={[styles.hint, { color: theme.muted }]}>
-        Point phone at wind and slowly pan left and right to capture peak signal
-      </Text>
 
     </ScrollView>
   );
@@ -465,7 +683,6 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: 18, paddingTop: 18, paddingBottom: 36, alignItems: 'center' },
   title: { fontSize: 18, fontFamily: 'Courier', fontWeight: '900', letterSpacing: 4, alignSelf: 'flex-start', marginBottom: 8 },
   divider: { height: 1, opacity: 0.55, alignSelf: 'stretch', marginBottom: 14 },
-  hint: { fontSize: 10, fontFamily: 'Courier', letterSpacing: 1, textAlign: 'center', marginBottom: 8 },
   bfBar: { flexDirection: 'row', alignItems: 'flex-end', gap: 4, marginTop: 8, height: 40 },
   bfSegment: { width: 22, borderRadius: 2 },
   bfLabelRow: { flexDirection: 'row', justifyContent: 'space-between', alignSelf: 'stretch', marginTop: 4, marginBottom: 16, paddingHorizontal: 4 },
@@ -473,10 +690,10 @@ const styles = StyleSheet.create({
   readout: { flexDirection: 'row', alignItems: 'baseline', gap: 6 },
   speedValue: { fontSize: 72, fontFamily: 'Courier', fontWeight: '900', letterSpacing: -2, lineHeight: 80 },
   speedUnit: { fontSize: 22, fontFamily: 'Courier', fontWeight: '600', letterSpacing: 2, marginBottom: 4 },
+  rangeText: { fontSize: 11, fontFamily: 'Courier', letterSpacing: 2, marginTop: 2 },
   beaufortLabelWrap: { flexDirection: 'row', alignItems: 'baseline', gap: 10, marginTop: 6 },
   beaufortNumber: { fontSize: 22, fontFamily: 'Courier', fontWeight: '900', letterSpacing: 2 },
   beaufortLabel: { fontSize: 16, fontFamily: 'Courier', fontWeight: '700', letterSpacing: 3 },
-  description: { fontSize: 11, fontFamily: 'Courier', letterSpacing: 1, textAlign: 'center', marginTop: 6, marginBottom: 8 },
   // Direction section
   dirSection: { alignSelf: 'stretch', marginTop: 16, paddingTop: 16, borderTopWidth: 1 },
   dirTitle: { fontSize: 11, fontFamily: 'Courier', fontWeight: '700', letterSpacing: 3, marginBottom: 12 },
@@ -486,32 +703,30 @@ const styles = StyleSheet.create({
   dirDeg: { fontSize: 20, fontFamily: 'Courier', fontWeight: '600', letterSpacing: 1, marginTop: 2 },
   dirLabel: { fontSize: 9, fontFamily: 'Courier', letterSpacing: 2, marginTop: 2 },
   dirPrompt: { fontSize: 11, fontFamily: 'Courier', letterSpacing: 1, lineHeight: 18 },
-  sweepTrack: { height: 4, alignSelf: 'stretch', borderRadius: 2, overflow: 'hidden' },
-  sweepFill: { height: '100%', borderRadius: 2 },
-  sweepLabels: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
-  sweepLabel: { fontSize: 9, fontFamily: 'Courier', letterSpacing: 1 },
-  // Data rows
-  levelRow: { flexDirection: 'row', justifyContent: 'space-between', alignSelf: 'stretch', marginTop: 16, paddingVertical: 10, borderTopWidth: 1, borderTopColor: 'rgba(128,128,128,0.2)' },
-  rangeRow: { flexDirection: 'row', justifyContent: 'space-between', alignSelf: 'stretch', paddingVertical: 10, borderTopWidth: 1, borderTopColor: 'rgba(128,128,128,0.2)' },
-  levelLabel: { fontSize: 10, fontFamily: 'Courier', letterSpacing: 2 },
-  levelValue: { fontSize: 13, fontFamily: 'Courier', fontWeight: '600', letterSpacing: 1 },
-  panArrowRow: { flexDirection: 'row', alignItems: 'center', gap: 16, marginTop: 16, marginBottom: 8 },
-  panArrowLabel: { fontSize: 10, fontFamily: 'Courier', letterSpacing: 3 },
+  guidanceText: { fontSize: 10, fontFamily: 'Courier', letterSpacing: 2, textAlign: 'center', marginBottom: 4 },
   error: { fontSize: 12, fontFamily: 'Courier', letterSpacing: 1, marginTop: 10, textAlign: 'center' },
   button: { marginTop: 28, paddingVertical: 14, paddingHorizontal: 40, borderWidth: 2, borderRadius: 4 },
+  buttonSecondary: { marginTop: 12, paddingVertical: 10, paddingHorizontal: 28, borderWidth: 1 },
   buttonText: { fontSize: 15, fontFamily: 'Courier', fontWeight: '900', letterSpacing: 4 },
-  disclaimer: { fontSize: 9, fontFamily: 'Courier', letterSpacing: 1, textAlign: 'center', marginTop: 20 },
-  // Pass dots
-  passRow:       { alignItems: 'center', marginTop: 10, gap: 8 },
-  passLabel:     { fontSize: 9, fontFamily: 'Courier', letterSpacing: 1.5, textAlign: 'center' },
-  passDotsRow:   { flexDirection: 'row', gap: 10, marginTop: 4 },
-  passDot:       { width: 12, height: 12, borderRadius: 6 },
+  // Calibration form
+  calLabel: { fontSize: 10, fontFamily: 'Courier', letterSpacing: 3 },
+  calGuess: { fontSize: 24, fontFamily: 'Courier', fontWeight: '900', letterSpacing: 1, marginTop: 6 },
+  calInput: {
+    fontSize: 28,
+    fontFamily: 'Courier',
+    fontWeight: '700',
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    marginTop: 6,
+    minWidth: 160,
+    textAlign: 'center',
+  },
   // Result screen
   resultContainer: { alignItems: 'center', paddingVertical: 40 },
-  resultTitle:   { fontSize: 11, fontFamily: 'Courier', letterSpacing: 4, marginBottom: 12 },
-  resultDeg:     { fontSize: 80, fontFamily: 'Courier', fontWeight: '900', letterSpacing: -2, lineHeight: 86 },
-  resultCard:    { fontSize: 42, fontFamily: 'Courier', fontWeight: '900', letterSpacing: 4, marginTop: 4 },
+  resultDeg: { fontSize: 80, fontFamily: 'Courier', fontWeight: '900', letterSpacing: -2, lineHeight: 86 },
+  resultCard: { fontSize: 42, fontFamily: 'Courier', fontWeight: '900', letterSpacing: 4, marginTop: 4 },
   resultDivider: { height: 1, width: 120, opacity: 0.4, marginVertical: 24 },
-  resultKts:     { fontSize: 52, fontFamily: 'Courier', fontWeight: '900', letterSpacing: 2 },
-  resultBf:      { fontSize: 14, fontFamily: 'Courier', letterSpacing: 3, marginTop: 6 },
+  resultKts: { fontSize: 52, fontFamily: 'Courier', fontWeight: '900', letterSpacing: 2 },
 });

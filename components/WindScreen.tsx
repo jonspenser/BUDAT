@@ -17,6 +17,7 @@ import { formatHawaiiTime, getCardinalDirection } from '../constants/formatters'
 import { WindReading } from '../hooks/useWindData';
 import {
   EstimateUpdate,
+  HeadingUpdate,
   SweepUpdate,
   WindMeter,
   msToKnots,
@@ -29,6 +30,15 @@ function formatKnots(knots: number | null): string {
   return `${knots.toFixed(1)}kts`;
 }
 
+function normalizeDegrees(degrees: number): number {
+  return ((degrees % 360) + 360) % 360;
+}
+
+function formatDegrees(degrees: number | null | undefined): string {
+  if (degrees == null) return '--';
+  return `${Math.round(normalizeDegrees(degrees)).toString().padStart(3, '0')}°`;
+}
+
 const GUIDANCE_LABEL: Record<string, string> = {
   keepSweeping: 'SWEEP 360',
   rotateLeft: 'ROTATE LEFT',
@@ -37,6 +47,92 @@ const GUIDANCE_LABEL: Record<string, string> = {
   locked: 'LOCKED',
   noLock: 'NO CLEAR DIRECTION',
 };
+
+function LiveCompass({
+  heading,
+  windHeading,
+  theme,
+}: {
+  heading: number | null | undefined;
+  windHeading: number | null | undefined;
+  theme: Theme;
+}) {
+  const compassHeading = heading == null ? 0 : normalizeDegrees(heading);
+  const windMarker = windHeading == null ? null : normalizeDegrees(windHeading);
+  const marks = Array.from({ length: 8 }, (_, i) => i * 45);
+
+  return (
+    <View style={styles.compassWrap}>
+      <View style={[styles.compass, { borderColor: theme.accentDim }]}>
+        <View style={styles.phonePointer}>
+          <View style={[styles.phonePointerLine, { backgroundColor: theme.accent }]} />
+          <Text style={[styles.phonePointerText, { color: theme.accent }]}>PHONE AIM</Text>
+        </View>
+        <View
+          style={[
+            styles.compassRose,
+            { transform: [{ rotate: `${-compassHeading}deg` }] },
+          ]}
+        >
+          {marks.map((deg) => {
+            const isCardinal = deg % 90 === 0;
+            const label = deg === 0 ? 'N' : deg === 90 ? 'E' : deg === 180 ? 'S' : deg === 270 ? 'W' : `${deg}°`;
+            return (
+              <View
+                key={deg}
+                style={[
+                  styles.compassMark,
+                  { transform: [{ rotate: `${deg}deg` }] },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.compassTick,
+                    {
+                      backgroundColor: isCardinal ? theme.accent : theme.accentDim,
+                      height: isCardinal ? 18 : 12,
+                    },
+                  ]}
+                />
+                <Text
+                  style={[
+                    styles.compassLabel,
+                    {
+                      color: isCardinal ? theme.textPrimary : theme.muted,
+                      transform: [{ rotate: `${-deg + compassHeading}deg` }],
+                    },
+                  ]}
+                >
+                  {label}
+                </Text>
+              </View>
+            );
+          })}
+          {windMarker != null && (
+            <View
+              style={[
+                styles.windMarker,
+                { transform: [{ rotate: `${windMarker}deg` }] },
+              ]}
+            >
+              <View style={[styles.windMarkerDot, { backgroundColor: theme.accent }]} />
+            </View>
+          )}
+        </View>
+      </View>
+      <View style={styles.compassReadout}>
+        <Text style={[styles.compassReadoutLabel, { color: theme.muted }]}>CURRENT</Text>
+        <Text style={[styles.compassReadoutValue, { color: theme.textPrimary }]}>
+          {formatDegrees(heading)}
+        </Text>
+        <Text style={[styles.compassReadoutLabel, { color: theme.muted }]}>WIND LOCK</Text>
+        <Text style={[styles.compassReadoutValue, { color: theme.accent }]}>
+          {formatDegrees(windHeading)}
+        </Text>
+      </View>
+    </View>
+  );
+}
 
 interface WindScreenProps {
   windData: Record<string, WindReading | null>;
@@ -53,17 +149,20 @@ export default function WindScreen({ windData, height, refreshing, onRefresh, th
   const [trainingMode, setTrainingMode] = useState(false);
   const [sweep, setSweep] = useState<SweepUpdate | null>(null);
   const [estimate, setEstimate] = useState<EstimateUpdate | null>(null);
+  const [liveHeading, setLiveHeading] = useState<HeadingUpdate | null>(null);
   const [correctionInput, setCorrectionInput] = useState('');
   const [directionInput, setDirectionInput] = useState('');
   const [correctionUnit, setCorrectionUnit] = useState<'knots' | 'mph'>('knots');
 
   const sweepSub = useRef<ReturnType<typeof WindMeter.onSweepUpdate>>(null);
   const estimateSub = useRef<ReturnType<typeof WindMeter.onEstimateUpdate>>(null);
+  const headingSub = useRef<ReturnType<typeof WindMeter.onHeadingUpdate>>(null);
   const trainingModeRef = useRef(false);
 
   const stopListeners = useCallback(() => {
     sweepSub.current?.remove();
     estimateSub.current?.remove();
+    headingSub.current?.remove();
   }, []);
 
   const startMeasurement = useCallback(async (enableTrainingMode: boolean) => {
@@ -75,8 +174,12 @@ export default function WindScreen({ windData, height, refreshing, onRefresh, th
     setTrainingMode(enableTrainingMode);
     setSweep(null);
     setEstimate(null);
+    setLiveHeading(null);
     setMeasureState('sweeping');
 
+    headingSub.current = WindMeter.onHeadingUpdate((update) => {
+      setLiveHeading(update);
+    });
     sweepSub.current = WindMeter.onSweepUpdate((update) => {
       setSweep(update);
       if (update.isLocked) {
@@ -176,6 +279,7 @@ export default function WindScreen({ windData, height, refreshing, onRefresh, th
     estimate?.status === 'priorDominated' || estimate?.status === 'personalized';
   const guessedDirection =
     sweep?.lockedHeadingDegrees ?? sweep?.peakHeadingDegrees ?? null;
+  const currentHeading = liveHeading?.headingDegrees ?? sweep?.currentHeadingDegrees ?? null;
 
   return (
     <ScrollView
@@ -198,18 +302,18 @@ export default function WindScreen({ windData, height, refreshing, onRefresh, th
         <Text style={[styles.meterTitle, { color: theme.muted }]}>MIC WIND METER</Text>
 
         {measureState === 'idle' && (
-          <View style={styles.actionRow}>
+          <View style={styles.actionColumn}>
             <Pressable
               style={[styles.btn, { borderColor: theme.accent }]}
               onPress={handleMeasure}
             >
-              <Text style={[styles.btnText, { color: theme.accent }]}>MEASURE WIND</Text>
+              <Text style={[styles.btnText, { color: theme.accent }]}>TAKE MEASUREMENT</Text>
             </Pressable>
             <Pressable
-              style={[styles.btn, styles.trainingBtn, { backgroundColor: theme.accent, borderColor: theme.accent }]}
+              style={[styles.btn, { borderColor: theme.accentDim }]}
               onPress={handleTrainingMode}
             >
-              <Text style={[styles.btnText, { color: theme.background }]}>TRAINING MODE</Text>
+              <Text style={[styles.btnText, { color: theme.accentDim }]}>CALIBRATE</Text>
             </Pressable>
           </View>
         )}
@@ -218,7 +322,7 @@ export default function WindScreen({ windData, height, refreshing, onRefresh, th
           <>
             {trainingMode && (
               <Text style={[styles.trainingModeNote, { color: theme.accent }]}>
-                TRAINING MODE — LOCK WIND, THEN ENTER ANEMOMETER READING
+                CALIBRATING — LOCK WIND, THEN ENTER ANEMOMETER READING
               </Text>
             )}
             {/* Sweep guidance */}
@@ -230,6 +334,8 @@ export default function WindScreen({ windData, height, refreshing, onRefresh, th
                 {Math.round(sweep.coverage * 100)}% covered
               </Text>
             )}
+
+            <LiveCompass heading={currentHeading} windHeading={guessedDirection} theme={theme} />
 
             {/* Estimate */}
             {showEstimate && estimateKnots != null && (
@@ -280,7 +386,7 @@ export default function WindScreen({ windData, height, refreshing, onRefresh, th
           <View style={styles.calibrateForm}>
             {trainingMode && (
               <Text style={[styles.trainingModeNote, { color: theme.accent }]}>
-                TRAINING MODE ACTIVE
+                CALIBRATION ACTIVE
               </Text>
             )}
             <Text style={[styles.calibrateLabel, { color: theme.muted }]}>
@@ -441,6 +547,99 @@ const styles = StyleSheet.create({
     fontFamily: 'Courier',
     letterSpacing: 1,
   },
+  compassWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    marginVertical: 4,
+  },
+  compass: {
+    width: 150,
+    height: 150,
+    borderRadius: 75,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  compassRose: {
+    width: 132,
+    height: 132,
+    borderRadius: 66,
+    position: 'relative',
+  },
+  compassMark: {
+    position: 'absolute',
+    left: 64,
+    top: 0,
+    width: 4,
+    height: 132,
+    alignItems: 'center',
+  },
+  compassTick: {
+    width: 2,
+    borderRadius: 1,
+  },
+  compassLabel: {
+    position: 'absolute',
+    top: 21,
+    width: 44,
+    marginLeft: -20,
+    textAlign: 'center',
+    fontSize: 10,
+    fontFamily: 'Courier',
+    fontWeight: '700',
+    letterSpacing: 1,
+  },
+  phonePointer: {
+    position: 'absolute',
+    top: 8,
+    alignItems: 'center',
+    zIndex: 2,
+  },
+  phonePointerLine: {
+    width: 3,
+    height: 32,
+    borderRadius: 2,
+  },
+  phonePointerText: {
+    marginTop: 2,
+    fontSize: 7,
+    fontFamily: 'Courier',
+    fontWeight: '700',
+    letterSpacing: 1,
+  },
+  windMarker: {
+    position: 'absolute',
+    left: 63,
+    top: 0,
+    width: 6,
+    height: 132,
+    alignItems: 'center',
+  },
+  windMarkerDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 4.5,
+    marginTop: 44,
+  },
+  compassReadout: {
+    flex: 1,
+    gap: 2,
+  },
+  compassReadoutLabel: {
+    fontSize: 8,
+    fontFamily: 'Courier',
+    fontWeight: '700',
+    letterSpacing: 1.5,
+  },
+  compassReadoutValue: {
+    fontSize: 24,
+    fontFamily: 'Courier',
+    fontWeight: '700',
+    letterSpacing: 1,
+    marginBottom: 6,
+  },
   estimateRow: {
     gap: 2,
   },
@@ -467,6 +666,10 @@ const styles = StyleSheet.create({
   },
   actionRow: {
     flexDirection: 'row',
+    gap: 10,
+  },
+  actionColumn: {
+    flexDirection: 'column',
     gap: 10,
   },
   btn: {
