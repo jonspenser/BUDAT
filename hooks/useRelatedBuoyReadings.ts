@@ -18,7 +18,7 @@ import { NEARSHORE_STATIONS } from '../constants/buoys';
 
 // ── Which buoys to correlate for each main station ────────────────────────────
 
-const RELATED_MAP: Record<string, string[]> = {
+export const RELATED_MAP: Record<string, string[]> = {
   '51208': ['51201'],            // Pauwela → Waimea Bay
   '51201': ['51208'],            // Waimea Bay → Pauwela
   '51213': ['51201', '51208'],   // Hanalei → Waimea, Pauwela
@@ -31,7 +31,7 @@ const RELATED_MAP: Record<string, string[]> = {
 // buoys. The main station is filtered out, and downstream buoys are dropped by
 // the propagation step below, so only buoys that saw the swell first remain.
 
-const DIRECTION_BUOYS: Record<'N' | 'S' | 'E' | 'W', string[]> = {
+export const DIRECTION_BUOYS: Record<'N' | 'S' | 'E' | 'W', string[]> = {
   N: ['51001', '51000', '51213', '51201', '51208'], // NW+NE offshore; Hanalei, Waimea, Pauwela (north shores)
   S: ['51002', '51004', '51205', '51212'],          // SW+SE offshore; Barbers Pt, Lanai (south facing)
   E: ['51000', '51004', '51208', '51206'],          // NE+SE offshore; Pauwela, Hilo (east facing)
@@ -40,7 +40,7 @@ const DIRECTION_BUOYS: Record<'N' | 'S' | 'E' | 'W', string[]> = {
 
 // ── Buoy coords (from NEARSHORE_STATIONS, duplicated for quick lookup) ────────
 
-const COORDS: Record<string, { lat: number; lon: number }> = {};
+export const COORDS: Record<string, { lat: number; lon: number }> = {};
 for (const s of NEARSHORE_STATIONS) COORDS[s.id] = { lat: s.lat, lon: s.lon };
 
 // ── NDBC .spec cache (module-level, 30-min TTL) ───────────────────────────────
@@ -49,7 +49,7 @@ interface CacheEntry { text: string; fetchedAt: number }
 const specCache: Record<string, CacheEntry> = {};
 const CACHE_TTL = 30 * 60 * 1000;
 
-async function fetchSpec(id: string): Promise<string> {
+export async function fetchSpec(id: string): Promise<string> {
   const now = Date.now();
   if (specCache[id] && now - specCache[id].fetchedAt < CACHE_TTL) {
     return specCache[id].text;
@@ -64,14 +64,14 @@ async function fetchSpec(id: string): Promise<string> {
 
 // ── Parse .spec text into rows ────────────────────────────────────────────────
 
-interface SpecRow {
+export interface SpecRow {
   time: Date;
   heightM: number;
   period: number;
   dirDeg: number | null;
 }
 
-function parseSpec(text: string): SpecRow[] {
+export function parseSpec(text: string): SpecRow[] {
   const rows: SpecRow[] = [];
   for (const line of text.split('\n')) {
     if (line.startsWith('#') || !line.trim()) continue;
@@ -98,7 +98,7 @@ function parseSpec(text: string): SpecRow[] {
 
 // ── Closest row to a target timestamp ────────────────────────────────────────
 
-function closestRow(rows: SpecRow[], target: Date): SpecRow | null {
+export function closestRow(rows: SpecRow[], target: Date): SpecRow | null {
   if (!rows.length) return null;
   let best = rows[0];
   let bestDiff = Math.abs(rows[0].time.getTime() - target.getTime());
@@ -111,7 +111,7 @@ function closestRow(rows: SpecRow[], target: Date): SpecRow | null {
 
 // ── Swell propagation offset ──────────────────────────────────────────────────
 
-function swellOffset(
+export function swellOffset(
   mainLat: number, mainLon: number,
   relLat: number,  relLon: number,
   fromDeg: number,   // swell coming FROM (meteorological convention)

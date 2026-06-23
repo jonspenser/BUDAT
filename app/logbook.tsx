@@ -23,6 +23,7 @@ import { useSwellLogContext } from '../contexts/SwellLogContext';
 import { useTheme } from '../hooks/useTheme';
 import { useRelatedBuoyReadings, RelatedReading } from '../hooks/useRelatedBuoyReadings';
 import { getCardinalDirection } from '../constants/formatters';
+import { computeFingerprint, requestNotificationPermission } from '../hooks/useSwellAlerts';
 
 type SortKey = 'date' | 'size' | 'direction' | 'speed';
 
@@ -1045,6 +1046,95 @@ function AudioControls(_props: { audioUri?: string; onRecorded: (uri: string) =>
   return null;
 }
 
+// ── Alert toggle ──────────────────────────────────────────────────────────────
+
+function AlertToggleRow({ rec }: { rec: SwellRecord }) {
+  const colors = useNbColors();
+  const { enableAlert, disableAlert } = useSwellLogContext();
+  const [computing, setComputing] = useState(false);
+
+  const toggle = async () => {
+    if (rec.alertEnabled) {
+      disableAlert(rec.id);
+      return;
+    }
+    const granted = await requestNotificationPermission();
+    if (!granted) {
+      Alert.alert('Notifications Disabled', 'Enable notifications in Settings to use swell alerts.');
+      return;
+    }
+    setComputing(true);
+    try {
+      const fps = await computeFingerprint(rec);
+      if (!fps.length) {
+        Alert.alert('No Offshore Data', 'Could not find a matching offshore reading. Try setting a swell window (N/S/E/W) when logging.');
+        return;
+      }
+      enableAlert(rec.id, fps);
+    } catch {
+      Alert.alert('Network Error', 'Could not fetch offshore buoy data. Check your connection.');
+    } finally {
+      setComputing(false);
+    }
+  };
+
+  const isOn = rec.alertEnabled;
+  const label = computing ? 'COMPUTING...' : `NOTIFY WHEN REPEATS  [ ${isOn ? 'ON' : 'OFF'} ]`;
+
+  return (
+    <>
+      <TouchableOpacity
+        onPress={toggle}
+        disabled={computing}
+        style={[at.row, { borderTopColor: colors.ruled }]}
+      >
+        <Text style={[at.label, { color: isOn ? colors.marginC : colors.inkFaint }]}>{label}</Text>
+      </TouchableOpacity>
+      {isOn && rec.offshoreFingerprint?.map(fp => (
+        <View key={fp.stationId} style={[rb.row, { borderTopColor: colors.ruled }]}>
+          <Text style={[rb.station, { color: colors.inkFaint }]}>WATCHING  {fp.stationName}</Text>
+          <Text style={[rb.val, { color: colors.inkMid }]}>{fp.heightFt.toFixed(1)}ft</Text>
+          <Text style={[rb.val, { color: colors.inkMid }]}>{fp.period.toFixed(0)}s</Text>
+          <Text style={[rb.val, { color: colors.inkMid }]}>
+            {fp.dirDeg != null ? (getCardinalDirection(fp.dirDeg) ?? '—') : '—'}
+          </Text>
+          <Text style={[rb.when, { color: colors.inkFaint }]}>{Math.abs(fp.offsetHours).toFixed(0)}h out</Text>
+        </View>
+      ))}
+      {isOn && rec.lastAlertFiredAt && (
+        <View style={at.firedRow}>
+          <Text style={[at.firedLabel, { color: colors.inkFaint }]}>
+            LAST FIRED  {new Date(rec.lastAlertFiredAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toUpperCase()}
+          </Text>
+        </View>
+      )}
+    </>
+  );
+}
+
+const at = StyleSheet.create({
+  row: {
+    borderTopWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  label: {
+    fontFamily: 'Courier',
+    fontSize: 10,
+    letterSpacing: 1.5,
+    fontWeight: '600',
+  },
+  firedRow: {
+    paddingHorizontal: 14,
+    paddingBottom: 6,
+  },
+  firedLabel: {
+    fontFamily: 'Courier',
+    fontSize: 8,
+    letterSpacing: 1,
+  },
+});
+
 
 // ── Logbook content ───────────────────────────────────────────────────────────
 
@@ -1216,6 +1306,7 @@ function LogbookContent({ height }: { height?: number }) {
                       onRecorded={uri => updateRecord(rec.id, { audioUri: uri })}
                     />
                     <RelatedBuoyRows rec={rec} />
+                    <AlertToggleRow rec={rec} />
                     <TouchableOpacity
                       onPress={() => Alert.alert('Delete Entry', 'Remove this entry from the log?', [
                         { text: 'Cancel', style: 'cancel' },

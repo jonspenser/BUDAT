@@ -23,7 +23,8 @@
         "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "Take a photo of the ocean to attach to your swell log.",
         "NSPhotoLibraryUsageDescription": "Select a photo from your library to attach to your swell log.",
-        "NSMicrophoneUsageDescription": "Measure wind speed using the microphone as an anemometer."
+        "NSMicrophoneUsageDescription": "Measure wind speed using the microphone as an anemometer.",
+        "NSUserNotificationUsageDescription": "Receive alerts when saved swell conditions are detected at offshore buoys."
       },
       "buildNumber": "20"
     },
@@ -51,7 +52,9 @@
     "owner": "jonspenser",
     "sdkVersion": "54.0.0",
     "plugins": [
-      "expo-router"
+      "expo-router",
+      ["expo-background-fetch"],
+      ["expo-notifications", { "sounds": [] }]
     ]
   }
 }

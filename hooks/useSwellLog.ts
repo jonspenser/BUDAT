@@ -7,6 +7,15 @@ const STORAGE_KEY = '@budat/swell_log';
 
 export type SwellCategory = 'S' | 'M' | 'L' | 'XL' | 'XXL';
 
+export interface OffshoreFingerprint {
+  stationId: string;
+  stationName: string;
+  heightFt: number;
+  period: number;
+  dirDeg: number | null;
+  offsetHours: number; // negative = offshore saw it before nearshore
+}
+
 export interface SwellRecord {
   id: string;
   stationId: string;
@@ -30,6 +39,9 @@ export interface SwellRecord {
   photoUri?: string;
   audioUri?: string;
   note?: string;
+  alertEnabled?: boolean;
+  lastAlertFiredAt?: string; // ISO — throttle re-notification
+  offshoreFingerprint?: OffshoreFingerprint[];
 }
 
 // ── Moon phase ────────────────────────────────────────────────────────────────
@@ -199,5 +211,31 @@ export function useSwellLog() {
     return null;
   }, []);
 
-  return { records, loaded, logSwell, updateRecord, deleteRecord, clearAll, detectNewSwell };
+  const enableAlert = useCallback((id: string, fingerprints: OffshoreFingerprint[]) => {
+    setRecords(prev => {
+      const next = prev.map(r => r.id === id ? { ...r, alertEnabled: true, offshoreFingerprint: fingerprints } : r);
+      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next)).catch(() => {});
+      return next;
+    });
+  }, []);
+
+  const disableAlert = useCallback((id: string) => {
+    setRecords(prev => {
+      const next = prev.map(r => r.id === id
+        ? { ...r, alertEnabled: false, offshoreFingerprint: undefined, lastAlertFiredAt: undefined }
+        : r);
+      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next)).catch(() => {});
+      return next;
+    });
+  }, []);
+
+  const markAlertFired = useCallback((id: string) => {
+    setRecords(prev => {
+      const next = prev.map(r => r.id === id ? { ...r, lastAlertFiredAt: new Date().toISOString() } : r);
+      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next)).catch(() => {});
+      return next;
+    });
+  }, []);
+
+  return { records, loaded, logSwell, updateRecord, deleteRecord, clearAll, detectNewSwell, enableAlert, disableAlert, markAlertFired };
 }
