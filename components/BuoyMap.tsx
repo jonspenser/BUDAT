@@ -84,9 +84,10 @@ interface Props {
   buoyData: Record<string, BuoyData>;
   mode: 'wave' | 'wind';
   kahuluiWind: KahuluiWindData;
+  historicalYear?: number;
 }
 
-export default function BuoyMap({ buoyData, kahuluiWind }: Props) {
+export default function BuoyMap({ buoyData, kahuluiWind, historicalYear }: Props) {
   const cornerStations = BUOY_STATIONS.filter(s => s.corner);
   const nearshoreStations = BUOY_STATIONS.filter(s => !s.corner);
 
@@ -173,6 +174,14 @@ export default function BuoyMap({ buoyData, kahuluiWind }: Props) {
           <Text style={styles.cornerTime}>{kahuluiWind.timestamp}</Text>
         )}
       </View>
+
+      {/* Historical year watermark */}
+      {historicalYear !== undefined && (
+        <View style={styles.yearWatermark} pointerEvents="none">
+          <Text style={styles.yearWatermarkText}>{historicalYear}</Text>
+          <Text style={styles.yearWatermarkSub}>ANNUAL AVG</Text>
+        </View>
+      )}
 
       {/* Nearshore buoys overlaid on island map */}
       {nearshoreStations.map(station => {
@@ -285,5 +294,28 @@ const styles = StyleSheet.create({
     fontFamily: 'Courier',
     fontSize: 9,
     color: COLORS.dim,
+  },
+  yearWatermark: {
+    position: 'absolute',
+    left: COL,
+    top: 0,
+    width: COL,
+    height: ROW,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  yearWatermarkText: {
+    fontFamily: 'Courier',
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: COLORS.primary + '55',
+    letterSpacing: 3,
+  },
+  yearWatermarkSub: {
+    fontFamily: 'Courier',
+    fontSize: 9,
+    color: COLORS.dim + '88',
+    letterSpacing: 2,
+    marginTop: 2,
   },
 });
