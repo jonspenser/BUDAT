@@ -12,6 +12,7 @@ import Svg, { Circle, Path, Line, G } from 'react-native-svg';
 import { Theme } from '../constants/colors';
 import { useMicWind, BeaufortInfo } from '../hooks/useMicWind';
 import CalibrationPanel from './CalibrationPanel';
+import WindRadar from './WindRadar';
 
 const { width: W } = Dimensions.get('window');
 const GAUGE_R = W * 0.38;
@@ -294,6 +295,14 @@ export default function MicWindScreen({ theme, height, active = true }: Props) {
   const hasDirection = mic.windHeadingDeg !== null;
   const PASSES_NEEDED = 6;
 
+  // Live pan guidance — how far the current heading is from the detected peak
+  const radarSize = Math.min(W * 0.64, 250);
+  const offPeak =
+    mic.windHeadingDeg !== null && mic.currentHeadingDeg !== null
+      ? (() => { const d = Math.abs(mic.currentHeadingDeg - mic.windHeadingDeg) % 360; return d > 180 ? 360 - d : d; })()
+      : null;
+  const onTarget = offPeak !== null && offPeak < 12;
+
   if (mic.isComplete && mic.result) {
     return (
       <ScrollView
@@ -350,33 +359,41 @@ export default function MicWindScreen({ theme, height, active = true }: Props) {
         <View style={[styles.dirSection, { borderTopColor: theme.accentDim }]}>
           <Text style={[styles.dirTitle, { color: theme.accent }]}>WIND DIRECTION</Text>
 
-          <View style={styles.dirBody}>
-            <CompassRose headingDeg={mic.windHeadingDeg} sweepDeg={mic.sweepDeg} theme={theme} />
-
-            <View style={styles.dirRight}>
-              {hasDirection ? (
-                <>
-                  <Text style={[styles.dirCardinal, { color: theme.accent }]}>{mic.windCardinal}</Text>
-                  <Text style={[styles.dirDeg, { color: theme.textPrimary }]}>
-                    {Math.round(mic.windHeadingDeg!)}°
-                  </Text>
-                  <Text style={[styles.dirLabel, { color: theme.muted }]}>FROM</Text>
-                </>
-              ) : (
-                <Text style={[styles.dirPrompt, { color: theme.muted }]}>
-                  {mic.sweepDeg < 15
-                    ? 'Slowly sweep\nphone across\nwind line'
-                    : `Sweep: ${Math.round(mic.sweepDeg)}°\nKeep sweeping…`}
-                </Text>
-              )}
-            </View>
+          {/* Radar lobe — grows toward the wind as you pan */}
+          <View style={styles.radarWrap}>
+            <WindRadar
+              signalProfile={mic.signalProfile}
+              headingDeg={mic.windHeadingDeg}
+              currentHeadingDeg={mic.currentHeadingDeg}
+              theme={theme}
+              size={radarSize}
+            />
           </View>
 
-          {/* Pass counter */}
+          {/* Readout / prompt */}
+          {hasDirection ? (
+            <View style={styles.dirReadoutRow}>
+              <Text style={[styles.dirCardinal, { color: theme.accent }]}>{mic.windCardinal}</Text>
+              <View style={styles.dirDegWrap}>
+                <Text style={[styles.dirDeg, { color: theme.textPrimary }]}>{Math.round(mic.windHeadingDeg!)}°</Text>
+                <Text style={[styles.dirLabel, { color: theme.muted }]}>FROM</Text>
+              </View>
+            </View>
+          ) : (
+            <Text style={[styles.dirPromptCenter, { color: theme.muted }]}>
+              {mic.sweepDeg < 15 ? 'SWEEP SLOWLY ACROSS THE WIND' : `SWEEP: ${Math.round(mic.sweepDeg)}° · KEEP GOING`}
+            </Text>
+          )}
+
+          {/* Live pan guidance + pass counter */}
           {hasDirection && (
             <View style={styles.passRow}>
-              <Text style={[styles.passLabel, { color: theme.muted }]}>
-                {mic.passCount < PASSES_NEEDED ? 'KEEP SWEEPING' : 'LOCKING…'}
+              <Text style={[styles.passLabel, { color: onTarget ? theme.accent : theme.muted }]}>
+                {mic.passCount >= PASSES_NEEDED
+                  ? 'LOCKING…'
+                  : onTarget
+                    ? '● ON THE MARK — HOLD'
+                    : 'MOVE NEEDLE TO THE DOT'}
               </Text>
               <PassDots count={Math.floor(mic.passCount / 2)} needed={3} theme={theme} />
             </View>
@@ -388,10 +405,10 @@ export default function MicWindScreen({ theme, height, active = true }: Props) {
         <Text style={[styles.error, { color: theme.accent }]}>{mic.error}</Text>
       )}
 
-      <PanArrows theme={theme} />
+      {!hasDirection && <PanArrows theme={theme} />}
 
       <Text style={[styles.hint, { color: theme.muted }]}>
-        Point phone at wind and slowly pan left and right to capture peak signal
+        Hold the mic into the wind and pan left–right. The lobe grows toward the wind; line the grey needle up with the red dot.
       </Text>
 
     </ScrollView>
@@ -417,7 +434,11 @@ const styles = StyleSheet.create({
   description: { fontSize: 11, fontFamily: 'Courier', letterSpacing: 1, textAlign: 'center', marginTop: 6, marginBottom: 8 },
   // Direction section
   dirSection: { alignSelf: 'stretch', marginTop: 16, paddingTop: 16, borderTopWidth: 1 },
-  dirTitle: { fontSize: 11, fontFamily: 'Courier', fontWeight: '700', letterSpacing: 3, marginBottom: 12 },
+  dirTitle: { fontSize: 11, fontFamily: 'Courier', fontWeight: '700', letterSpacing: 3, marginBottom: 12, textAlign: 'center' },
+  radarWrap: { alignItems: 'center', marginBottom: 12 },
+  dirReadoutRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 16 },
+  dirDegWrap: { alignItems: 'flex-start' },
+  dirPromptCenter: { fontSize: 11, fontFamily: 'Courier', letterSpacing: 1.5, textAlign: 'center', lineHeight: 18 },
   dirBody: { flexDirection: 'row', alignItems: 'center', gap: 20, marginBottom: 14 },
   dirRight: { flex: 1 },
   dirCardinal: { fontSize: 36, fontFamily: 'Courier', fontWeight: '900', letterSpacing: 2 },

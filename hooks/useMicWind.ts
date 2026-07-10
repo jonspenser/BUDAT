@@ -79,6 +79,30 @@ function circularSpread(angles: number[]): number {
 
 interface HeadingSample { heading: number; db: number; t: number }
 
+// Number of bearing bins for the radar-lobe visualization (15° each)
+const PROFILE_BINS = 24;
+
+/**
+ * Bin the heading buffer into PROFILE_BINS bearings, taking the loudest dB per
+ * bin, then normalize 0..1 across the observed range so the UI can draw a lobe
+ * that points at the wind. Bins with no samples read 0.
+ */
+function computeProfile(buf: HeadingSample[]): number[] {
+  const bins = new Array<number>(PROFILE_BINS).fill(-Infinity);
+  const binSize = 360 / PROFILE_BINS;
+  for (const s of buf) {
+    const i = Math.floor((((s.heading % 360) + 360) % 360) / binSize) % PROFILE_BINS;
+    if (s.db > bins[i]) bins[i] = s.db;
+  }
+  const present = bins.filter(v => v > -Infinity);
+  if (present.length === 0) return new Array(PROFILE_BINS).fill(0);
+  const min = Math.min(...present);
+  const max = Math.max(...present);
+  const span = max - min;
+  // Until there's real contrast, show a low flat ring rather than noise
+  return bins.map(v => (v === -Infinity ? 0 : span < 0.5 ? 0.15 : (v - min) / span));
+}
+
 function computeWindHeading(buf: HeadingSample[]): { heading: number | null; sweepDeg: number } {
   if (buf.length < 5) return { heading: null, sweepDeg: 0 };
   const spread = circularSpread(buf.map(b => b.heading));
@@ -117,6 +141,8 @@ export interface MicWindState {
   windCardinal: string | null;
   sweepDeg: number;
   passCount: number;
+  currentHeadingDeg: number | null;
+  signalProfile: number[];
   start: () => Promise<void>;
   stop: () => Promise<void>;
   reset: () => void;
@@ -133,6 +159,8 @@ export function useMicWind(): MicWindState {
   const [windHeadingDeg, setWindHeadingDeg] = useState<number | null>(null);
   const [sweepDeg,      setSweepDeg]        = useState(0);
   const [passCount,     setPassCount]       = useState(0);
+  const [currentHeadingDeg, setCurrentHeadingDeg] = useState<number | null>(null);
+  const [signalProfile, setSignalProfile]   = useState<number[]>([]);
   const [error,         setError]           = useState<string | null>(null);
 
   const recordingRef    = useRef<Audio.Recording | null>(null);
@@ -164,6 +192,8 @@ export function useMicWind(): MicWindState {
     setWindHeadingDeg(null);
     setSweepDeg(0);
     setPassCount(0);
+    setCurrentHeadingDeg(null);
+    setSignalProfile([]);
   }, [stopRecording]);
 
   const reset = useCallback(() => {
@@ -174,6 +204,8 @@ export function useMicWind(): MicWindState {
     setWindHeadingDeg(null);
     setSweepDeg(0);
     setPassCount(0);
+    setCurrentHeadingDeg(null);
+    setSignalProfile([]);
     smoothedRef.current = null;
     headingBuf.current = [];
     inPeakZoneRef.current = false;
@@ -228,6 +260,8 @@ export function useMicWind(): MicWindState {
           const { heading, sweepDeg } = computeWindHeading(headingBuf.current);
           setWindHeadingDeg(heading);
           setSweepDeg(sweepDeg);
+          setCurrentHeadingDeg(currentHeading.current);
+          setSignalProfile(computeProfile(headingBuf.current));
 
           // Pass counting — once we have a heading estimate, track sweeps through peak zone
           if (heading !== null) {
@@ -283,6 +317,8 @@ export function useMicWind(): MicWindState {
     windCardinal: windHeadingDeg !== null ? headingToCardinal(windHeadingDeg) : null,
     sweepDeg,
     passCount,
+    currentHeadingDeg,
+    signalProfile,
     start,
     stop,
     reset,
