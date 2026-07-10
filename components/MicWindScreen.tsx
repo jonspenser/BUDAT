@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
 import Svg, { Circle, Path, Line, G } from 'react-native-svg';
 import { Theme } from '../constants/colors';
 import { useMicWind, BeaufortInfo } from '../hooks/useMicWind';
+import CalibrationPanel from './CalibrationPanel';
 
 const { width: W } = Dimensions.get('window');
 const GAUGE_R = W * 0.38;
@@ -275,12 +276,19 @@ interface Props {
 
 export default function MicWindScreen({ theme, height, active = true }: Props) {
   const mic = useMicWind();
+  const [calibrating, setCalibrating] = useState(false);
 
+  // Main measurement mic runs only when the page is active AND not calibrating
+  // (calibration runs its own recorder — never two at once).
   useEffect(() => {
-    if (!active) return;
+    if (!active || calibrating) return;
     mic.start();
     return () => { mic.stop(); };
-  }, [active]);
+  }, [active, calibrating]);
+
+  if (calibrating) {
+    return <CalibrationPanel theme={theme} height={height} onExit={() => setCalibrating(false)} />;
+  }
 
   const knotsText = mic.estimatedKnots !== null ? `${Math.round(mic.estimatedKnots)}` : '--';
   const hasDirection = mic.windHeadingDeg !== null;
@@ -302,7 +310,13 @@ export default function MicWindScreen({ theme, height, active = true }: Props) {
       style={[styles.container, { backgroundColor: theme.background, width: W, height, transform: [{ rotate: '180deg' }] }]}
       contentContainerStyle={styles.content}
     >
-      <Text style={[styles.title, { color: theme.accent }]}>ANEMOMETER</Text>
+      <Text
+        style={[styles.title, { color: theme.accent }]}
+        onLongPress={() => setCalibrating(true)}
+        suppressHighlighting
+      >
+        ANEMOMETER
+      </Text>
       <View style={[styles.divider, { backgroundColor: theme.accent }]} />
 
       <WindGauge beaufortFractional={mic.beaufortFractional} isRecording={mic.isRecording} theme={theme} />
