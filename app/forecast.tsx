@@ -10,6 +10,7 @@ import {
 import Svg, { Path, Circle, Line, Polygon, Text as SvgText } from 'react-native-svg';
 import { useWaveForecast, WaveForecastPoint } from '../hooks/useWaveForecast';
 import { useWindForecast, WindForecastPoint } from '../hooks/useWindForecast';
+import { useOpenMeteoForecast, OpenMeteoPoint } from '../hooks/useOpenMeteoForecast';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -21,6 +22,14 @@ export const FORECAST_COORDS: Record<string, { lat: number; lon: number; label: 
   nawiliwili: { lat: 21.90, lon: -159.30, label: 'NORTH KAUAI' },
   hilo:       { lat: 19.75, lon: -155.10, label: 'HILO' },
   kawaihae:   { lat: 20.00, lon: -155.85, label: 'WEST HAWAII' },
+};
+
+export const SOUTH_FORECAST_COORDS: Record<string, { lat: number; lon: number; label: string }> = {
+  kahului:    { lat: 20.55, lon: -156.45, label: 'SOUTH MAUI' },
+  honolulu:   { lat: 21.20, lon: -157.90, label: 'SOUTH SHORE' },
+  nawiliwili: { lat: 21.83, lon: -159.50, label: 'SOUTH KAUAI' },
+  hilo:       { lat: 18.90, lon: -155.65, label: 'KA LAE' },
+  kawaihae:   { lat: 19.50, lon: -155.97, label: 'SOUTH KONA' },
 };
 
 // ── Time helpers ──────────────────────────────────────────────────────────────
@@ -406,6 +415,195 @@ function CombinedForecastChart({
   );
 }
 
+// ── Open-Meteo swell+windwave chart ──────────────────────────────────────────
+
+function swellDirLabel(deg: number): string {
+  // Returns N / NE / E / SE / S / SW / W / NW based on incoming direction
+  const idx = Math.round(((deg % 360) + 360) % 360 / 45) % 8;
+  return ['N','NE','E','SE','S','SW','W','NW'][idx];
+}
+
+function OpenMeteoChart({
+  forecast, width, height, theme,
+}: {
+  forecast: OpenMeteoPoint[];
+  width: number;
+  height: number;
+  theme: any;
+}) {
+  const chartW = Math.max(width - PAD_L - PAD_R, 1);
+  const chartH = height - PAD_T - PAD_B;
+
+  const result = useMemo(() => {
+    const empty = {
+      swellPath: '', windWavePath: '',
+      yLabels: [] as { y: number; label: string }[],
+      dayBounds: [] as DayBound[],
+      nowX: null as number | null, nowY: null as number | null,
+      peakPerDay: [] as { x: number; y: number; ft: number; period: number; dirLabel: string; dirDeg: number }[],
+      swellArrows: [] as SwellArrow[],
+    };
+    if (forecast.length < 2) return empty;
+
+    const t0 = forecast[0].time.getTime();
+    const t1 = forecast[forecast.length - 1].time.getTime();
+    const tRange = t1 - t0;
+
+    const toFt = (m: number) => m * 3.28084;
+    const allSwellFt = forecast.map(p => toFt(p.swellHeightM));
+    const allWindFt  = forecast.map(p => toFt(p.windWaveHeightM));
+    const maxFt = Math.max(MIN_WAVE_MAX_FT, Math.ceil(Math.max(...allSwellFt, ...allWindFt)));
+    const minFt = Math.floor(Math.min(...allSwellFt));
+
+    const xS   = (t: number) => ((t - t0) / tRange) * chartW;
+    const yS   = (ft: number) => chartH - ((ft - minFt) / (maxFt - minFt)) * chartH;
+
+    const swellPts    = forecast.map(p => ({ x: xS(p.time.getTime()), y: yS(toFt(p.swellHeightM)) }));
+    const windWavePts = forecast.map(p => ({ x: xS(p.time.getTime()), y: yS(toFt(p.windWaveHeightM)) }));
+
+    const swellPath    = smoothCurvePath(swellPts);
+    const windWavePath = smoothCurvePath(windWavePts);
+
+    const step = maxFt > 10 ? 2 : 1;
+    const yLabels: { y: number; label: string }[] = [];
+    for (let ft = minFt; ft <= maxFt; ft += step) yLabels.push({ y: yS(ft), label: `${ft}` });
+
+    const dayBounds = buildDayBounds(forecast.map(p => p.time), t0, tRange, chartW);
+
+    // Peak swell per day + direction label
+    const dayMap = new Map<string, { x: number; y: number; ft: number; period: number; dirLabel: string; dirDeg: number }>();
+    forecast.forEach(pt => {
+      const k = hiDateKey(pt.time);
+      const ft = toFt(pt.swellHeightM);
+      const ex = dayMap.get(k);
+      if (!ex || ft > ex.ft) dayMap.set(k, {
+        x: xS(pt.time.getTime()),
+        y: yS(ft),
+        ft,
+        period: pt.swellPeriod,
+        dirLabel: swellDirLabel(pt.swellDirection),
+        dirDeg: pt.swellDirection,
+      });
+    });
+
+    // Now dot
+    const now = Date.now();
+    let nowX: number | null = null, nowY: number | null = null;
+    if (now >= t0 && now <= t1) {
+      nowX = xS(now);
+      for (let i = 0; i < forecast.length - 1; i++) {
+        const ta = forecast[i].time.getTime();
+        const tb = forecast[i + 1].time.getTime();
+        if (now >= ta && now <= tb) {
+          const t = (now - ta) / (tb - ta);
+          nowY = yS(toFt(forecast[i].swellHeightM) + (toFt(forecast[i + 1].swellHeightM) - toFt(forecast[i].swellHeightM)) * t);
+          break;
+        }
+      }
+    }
+
+    // Swell direction arrows
+    const swellArrows: SwellArrow[] = [];
+    const MIN_SPACING = 30;
+    const maxArrows = Math.max(2, Math.floor(chartW / MIN_SPACING));
+    const n = Math.min(maxArrows, forecast.length);
+    for (let i = 0; i < n; i++) {
+      const idx = Math.round((i / (n - 1)) * (forecast.length - 1));
+      const pt = forecast[idx];
+      swellArrows.push({ x: xS(pt.time.getTime()), waveY: yS(toFt(pt.swellHeightM)), directionDeg: pt.swellDirection });
+    }
+
+    return { swellPath, windWavePath, yLabels, dayBounds, nowX, nowY, peakPerDay: Array.from(dayMap.values()), swellArrows };
+  }, [forecast, chartW, chartH]);
+
+  const { swellPath, windWavePath, yLabels, dayBounds, nowX, nowY, peakPerDay, swellArrows } = result;
+
+  return (
+    <Svg width={width} height={height}>
+      {yLabels.map((l, i) => (
+        <SvgText key={i} x={PAD_L - 4} y={PAD_T + l.y + 4}
+          fontSize={9} fontFamily="Courier" fill={theme.muted} textAnchor="end">
+          {l.label}
+        </SvgText>
+      ))}
+
+      {dayBounds.map((b, i) => (
+        <React.Fragment key={i}>
+          {i > 0 && (
+            <Line x1={PAD_L + b.x} y1={PAD_T} x2={PAD_L + b.x} y2={PAD_T + chartH}
+              stroke={theme.accentDim} strokeWidth={0.5} strokeDasharray="3,4" opacity={0.5} />
+          )}
+          <SvgText x={PAD_L + b.x + (i === 0 ? 0 : 3)} y={height - 4}
+            fontSize={9} fontFamily="Courier" fontWeight="700"
+            fill={b.isToday ? theme.accent : theme.muted} textAnchor="start">
+            {b.label}
+          </SvgText>
+        </React.Fragment>
+      ))}
+
+      {/* Wind wave line — dashed, dim */}
+      {windWavePath ? (
+        <Path d={windWavePath} stroke={theme.accentDim} strokeWidth={1.2}
+          strokeDasharray="4,3" fill="none" opacity={0.6}
+          transform={`translate(${PAD_L},${PAD_T})`} />
+      ) : null}
+
+      {/* Swell line — solid */}
+      {swellPath ? (
+        <Path d={swellPath} stroke={theme.accent} strokeWidth={1.5} fill="none"
+          transform={`translate(${PAD_L},${PAD_T})`} />
+      ) : null}
+
+      {/* Swell direction arrows */}
+      {swellArrows.map((a, i) => {
+        const travelDeg = (a.directionDeg + 180) % 360;
+        return (
+          <Polygon key={i}
+            points={arrowPoints(PAD_L + a.x, PAD_T + a.waveY - 8, 13, travelDeg)}
+            fill={theme.accent} opacity={0.65} />
+        );
+      })}
+
+      {/* Peak labels: ft / sec / dir */}
+      {peakPerDay.map((p, i) => {
+        const ftY  = Math.max(PAD_T + 9,  PAD_T + p.y - 34);
+        const secY = Math.max(PAD_T + 19, PAD_T + p.y - 23);
+        const dirY = Math.max(PAD_T + 29, PAD_T + p.y - 12);
+        const travelDeg = (p.dirDeg + 180) % 360;
+        const arrowX = PAD_L + p.x + (p.dirLabel.length > 1 ? 13 : 10);
+        return (
+          <React.Fragment key={i}>
+            <SvgText x={PAD_L + p.x} y={ftY}
+              fontSize={9} fontFamily="Courier" fontWeight="700"
+              fill={theme.textPrimary} textAnchor="middle">
+              {p.ft.toFixed(1)}ft
+            </SvgText>
+            {p.period > 0 && (
+              <SvgText x={PAD_L + p.x} y={secY}
+                fontSize={8} fontFamily="Courier" fill={theme.muted} textAnchor="middle">
+                {Math.round(p.period)}s
+              </SvgText>
+            )}
+            <SvgText x={PAD_L + p.x - 5} y={dirY}
+              fontSize={8} fontFamily="Courier" fill={theme.accent} textAnchor="middle" opacity={0.8}>
+              {p.dirLabel}
+            </SvgText>
+            <Polygon
+              points={arrowPoints(arrowX, PAD_T + dirY - 3, 8, travelDeg)}
+              fill={theme.accent}
+              opacity={0.75}
+            />
+          </React.Fragment>
+        );
+      })}
+
+      {nowX !== null && nowY !== null && (
+        <Circle cx={PAD_L + nowX} cy={PAD_T + nowY} r={4} fill={theme.accent} />
+      )}
+    </Svg>
+  );
+}
+
 // ── Section label ─────────────────────────────────────────────────────────────
 
 function SectionLabel({ text, unit, theme }: { text: string; unit: string; theme: any }) {
@@ -432,9 +630,13 @@ interface ForecastPageProps {
 
 export function ForecastPage({ height, theme, stationId }: ForecastPageProps) {
   const coords = FORECAST_COORDS[stationId] ?? FORECAST_COORDS.kahului;
+  const southCoords = SOUTH_FORECAST_COORDS[stationId] ?? SOUTH_FORECAST_COORDS.kahului;
 
   const { forecast: waveFc, loading: waveLoading, error: waveErr } = useWaveForecast(coords.lat, coords.lon);
   const { forecast: windFc, loading: windLoading, error: windErr } = useWindForecast(coords.lat, coords.lon);
+  const { forecast: southFc, loading: southLoading } = useWaveForecast(southCoords.lat, southCoords.lon);
+  const { forecast: omNorthFc, loading: omNorthLoading } = useOpenMeteoForecast(coords.lat, coords.lon);
+  const { forecast: omSouthFc, loading: omSouthLoading } = useOpenMeteoForecast(southCoords.lat, southCoords.lon);
 
   const loading = waveLoading && waveFc.length === 0;
   const error = waveErr ?? null;
@@ -480,7 +682,8 @@ export function ForecastPage({ height, theme, stationId }: ForecastPageProps) {
               <Text style={[styles.legendText, { color: theme.muted }]}>WIND</Text>
             </View>
           </View>
-          <SectionLabel text="FORECAST" unit="ft / wind" theme={theme} />
+
+          <SectionLabel text={coords.label} unit="ft / wind" theme={theme} />
           <View style={[styles.chartBox, { borderColor: theme.accentDim }]}>
             <CombinedForecastChart
               waveForecast={waveFc}
@@ -495,6 +698,62 @@ export function ForecastPage({ height, theme, stationId }: ForecastPageProps) {
           )}
           {(!windLoading && (windErr || windFc.length === 0)) && (
             <Text style={[styles.windNote, { color: theme.muted }]}>WRF WIND UNAVAILABLE</Text>
+          )}
+
+          <SectionLabel text={southCoords.label} unit="ft" theme={theme} />
+          {southLoading && southFc.length === 0 ? (
+            <View style={styles.chartLoading}>
+              <ActivityIndicator color={theme.accent} size="small" />
+            </View>
+          ) : (
+            <View style={[styles.chartBox, { borderColor: theme.accentDim }]}>
+              <CombinedForecastChart
+                waveForecast={southFc}
+                windForecast={[]}
+                width={chartW}
+                height={220}
+                theme={theme}
+              />
+            </View>
+          )}
+
+          {/* ── Open-Meteo section ── */}
+          <View style={[styles.modelDivider, { borderColor: theme.accentDim }]} />
+          <View style={styles.modelHeader}>
+            <Text style={[styles.modelLabel, { color: theme.accent }]}>OPEN-METEO</Text>
+            <Text style={[styles.modelSub, { color: theme.muted }]}>swell · chop</Text>
+          </View>
+          <View style={styles.omLegendRow}>
+            <View style={styles.legendItem}>
+              <View style={[styles.legendLine, { backgroundColor: theme.accent }]} />
+              <Text style={[styles.legendText, { color: theme.muted }]}>SWELL</Text>
+            </View>
+            <View style={styles.legendItem}>
+              <View style={[styles.omDashedLine, { borderColor: theme.accentDim }]} />
+              <Text style={[styles.legendText, { color: theme.muted }]}>WIND WAVE</Text>
+            </View>
+          </View>
+
+          <SectionLabel text={coords.label} unit="ft" theme={theme} />
+          {omNorthLoading && omNorthFc.length === 0 ? (
+            <View style={styles.chartLoading}>
+              <ActivityIndicator color={theme.accent} size="small" />
+            </View>
+          ) : (
+            <View style={[styles.chartBox, { borderColor: theme.accentDim }]}>
+              <OpenMeteoChart forecast={omNorthFc} width={chartW} height={220} theme={theme} />
+            </View>
+          )}
+
+          <SectionLabel text={southCoords.label} unit="ft" theme={theme} />
+          {omSouthLoading && omSouthFc.length === 0 ? (
+            <View style={styles.chartLoading}>
+              <ActivityIndicator color={theme.accent} size="small" />
+            </View>
+          ) : (
+            <View style={[styles.chartBox, { borderColor: theme.accentDim }]}>
+              <OpenMeteoChart forecast={omSouthFc} width={chartW} height={220} theme={theme} />
+            </View>
           )}
         </ScrollView>
       )}
@@ -517,5 +776,12 @@ const styles = StyleSheet.create({
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   legendLine: { width: 18, height: 2 },
   legendText: { fontFamily: 'Courier', fontWeight: '700', fontSize: 9, letterSpacing: 1 },
-  windNote:   { fontFamily: 'Courier', fontSize: 10, letterSpacing: 2, marginTop: 8, textAlign: 'center' },
+  windNote:     { fontFamily: 'Courier', fontSize: 10, letterSpacing: 2, marginTop: 8, textAlign: 'center' },
+  chartLoading: { height: 220, alignItems: 'center', justifyContent: 'center' },
+  modelDivider: { borderTopWidth: 1, marginTop: 24, marginBottom: 16, opacity: 0.4 },
+  modelHeader:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 },
+  modelLabel:   { fontFamily: 'Courier', fontWeight: '900', fontSize: 14, letterSpacing: 4 },
+  modelSub:     { fontFamily: 'Courier', fontSize: 9, letterSpacing: 2 },
+  omLegendRow:  { flexDirection: 'row', justifyContent: 'flex-end', gap: 14, marginBottom: 4 },
+  omDashedLine: { width: 18, height: 0, borderTopWidth: 1.5, borderStyle: 'dashed', opacity: 0.6 },
 });

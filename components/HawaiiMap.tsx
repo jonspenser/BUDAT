@@ -129,7 +129,7 @@ export default function HawaiiMap({ width, height, nearshoreStations, nearshoreD
             {nearshoreStations.map((station) => {
               const [bx, by] = projectBase(station.lon, station.lat);
               // Station dot tracks the zoomed geography; labels keep constant size
-              const x = bx * zoom + tx;
+              const x = bx * zoom + tx + (station.dotOffsetX ?? 0);
               const y = by * zoom + ty + (station.dotOffsetY ?? 0);
               const d = nearshoreData[station.id];
               const offline = isOffline(d?.timestamp);

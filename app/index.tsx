@@ -23,17 +23,14 @@ import { NEARSHORE_STATIONS } from '../constants/buoys';
 import { isOffline, getCardinalDirection } from '../constants/formatters';
 import { HAWAII_STATIONS } from '../constants/hawaiiStations';
 import { useBuoyData, BuoyReading } from '../hooks/useBuoyData';
-import { useHistoricalBuoyData } from '../hooks/useHistoricalBuoyData';
 import { useTideData } from '../hooks/useTideData';
 import { useWindData } from '../hooks/useWindData';
 import { useTheme } from '../hooks/useTheme';
 import { useSelectedStation } from '../hooks/useSelectedStation';
-import { useBuoyList } from '../hooks/useBuoyList';
 import { useSwellLogContext } from '../contexts/SwellLogContext';
 import { getMoonPhase } from '../hooks/useSwellLog';
 import HawaiiMap from '../components/HawaiiMap';
 import TideChart from '../components/TideChart';
-import DataScreen from '../components/DataScreen';
 import { LogbookPage } from './logbook';
 import { ForecastPage } from './forecast';
 import MicWindScreen from '../components/MicWindScreen';
@@ -91,9 +88,9 @@ function sunriseSunsetUTC(lat: number, lon: number, date: Date): { riseMins: num
 
 /** Format UTC-minutes-since-midnight to Hawaii (UTC-10) 12-hour time string */
 function utcMinsToHawaii(utcMins: number): string {
-  const hiMins = ((utcMins - 600) % 1440 + 1440) % 1440;
+  const hiMins = ((Math.round(utcMins) - 600) % 1440 + 1440) % 1440;
   const h24 = Math.floor(hiMins / 60);
-  const mn  = Math.round(hiMins % 60);
+  const mn  = hiMins % 60;
   const isPm = h24 >= 12;
   const h12  = h24 % 12 || 12;
   return `${h12}:${String(mn).padStart(2,'0')}${isPm ? 'p' : 'a'}`;
@@ -279,7 +276,7 @@ function WindTideBar({ windData, tideStation, nowTideHeight, nowTideLabel, onSta
   const moonRiseMins = moonriseUTC(HI_LAT, HI_LON, moonDate);
   const moonRiseLabel = moonRiseMins != null ? utcMinsToHawaii(moonRiseMins) : '--';
 
-  const sun = sunriseSunsetUTC(HI_LAT, HI_LON, new Date());
+  const sun = sunriseSunsetUTC(HI_LAT, HI_LON, moonDate);
   const riseLabel = sun ? utcMinsToHawaii(sun.riseMins) : '--';
   const setLabel  = sun ? utcMinsToHawaii(sun.setMins)  : '--';
 
@@ -472,8 +469,8 @@ function BuoyGrid({ nearshoreData, theme, onBuoyPress }: BuoyGridProps) {
   );
 }
 
-const SCREEN_LABELS = ['MAP', 'DATA', 'FORECAST', 'LOG', 'MIC'] as const;
-const REAL_PAGES = SCREEN_LABELS.length; // 5
+const SCREEN_LABELS = ['MAP', 'FORECAST', 'LOG', 'MIC'] as const;
+const REAL_PAGES = SCREEN_LABELS.length; // 4
 
 // Hawaii winter = Nov–Apr (north swells dominate)
 function isHawaiiWinter(): boolean {
@@ -697,84 +694,6 @@ const lsm = StyleSheet.create({
   actionText:   { fontFamily: 'Courier', fontWeight: '700', fontSize: 11, letterSpacing: 2 },
 });
 
-// ── Overlay picker modal ──────────────────────────────────────────────────────
-
-interface OverlayPickerModalProps {
-  visible: boolean;
-  date: Date;
-  onAdjust: (delta: number, unit: 'day' | 'hour') => void;
-  onConfirm: () => void;
-  onClear: () => void;
-  onCancel: () => void;
-  theme: any;
-}
-
-function OverlayPickerModal({ visible, date, onAdjust, onConfirm, onClear, onCancel, theme }: OverlayPickerModalProps) {
-  const ac = theme.accent;
-  const mu = theme.muted;
-  const bg = theme.background;
-  const atNow = Date.now() - date.getTime() < 3 * 60_000;
-  return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
-      <TouchableWithoutFeedback onPress={onCancel}>
-        <View style={opm.overlay}>
-          <TouchableWithoutFeedback>
-            <View style={[opm.box, { backgroundColor: bg, borderColor: ac }]}>
-              <Text style={[opm.title, { color: ac }]}>COMPARE DATE</Text>
-              <View style={opm.pickerSection}>
-                <View style={opm.pickerRow}>
-                  <TouchableOpacity onPress={() => onAdjust(-1, 'day')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                    <Text style={[opm.arrow, { color: ac }]}>‹</Text>
-                  </TouchableOpacity>
-                  <Text style={[opm.val, { color: theme.textPrimary }]}>{fmtHSTDate(date)}</Text>
-                  <TouchableOpacity onPress={() => onAdjust(1, 'day')} disabled={isToday(date)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                    <Text style={[opm.arrow, { color: ac, opacity: isToday(date) ? 0.25 : 1 }]}>›</Text>
-                  </TouchableOpacity>
-                </View>
-                <View style={opm.pickerRow}>
-                  <TouchableOpacity onPress={() => onAdjust(-1, 'hour')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                    <Text style={[opm.arrow, { color: ac }]}>‹</Text>
-                  </TouchableOpacity>
-                  <Text style={[opm.val, { color: theme.textPrimary }]}>{fmtHSTTime(date)}</Text>
-                  <TouchableOpacity onPress={() => onAdjust(1, 'hour')} disabled={atNow} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                    <Text style={[opm.arrow, { color: ac, opacity: atNow ? 0.25 : 1 }]}>›</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-              <View style={[opm.actions, { borderTopColor: theme.accentDim }]}>
-                <TouchableOpacity onPress={onClear} style={opm.actionBtn}>
-                  <Text style={[opm.actionText, { color: mu }]}>CLEAR</Text>
-                </TouchableOpacity>
-                <View style={[opm.actionDivider, { backgroundColor: theme.accentDim }]} />
-                <TouchableOpacity onPress={onCancel} style={opm.actionBtn}>
-                  <Text style={[opm.actionText, { color: mu }]}>CANCEL</Text>
-                </TouchableOpacity>
-                <View style={[opm.actionDivider, { backgroundColor: theme.accentDim }]} />
-                <TouchableOpacity onPress={onConfirm} style={opm.actionBtn}>
-                  <Text style={[opm.actionText, { color: ac }]}>COMPARE</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </TouchableWithoutFeedback>
-        </View>
-      </TouchableWithoutFeedback>
-    </Modal>
-  );
-}
-
-const opm = StyleSheet.create({
-  overlay:      { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', alignItems: 'center', justifyContent: 'center' },
-  box:          { width: 290, borderWidth: 1, borderRadius: 6, paddingTop: 20, paddingBottom: 0, overflow: 'hidden' },
-  title:        { fontFamily: 'Courier', fontWeight: '900', fontSize: 14, letterSpacing: 4, textAlign: 'center', marginBottom: 18 },
-  pickerSection:{ marginHorizontal: 20, marginBottom: 18, gap: 10 },
-  pickerRow:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  arrow:        { fontFamily: 'Courier', fontSize: 22, fontWeight: '300', paddingHorizontal: 8 },
-  val:          { fontFamily: 'Courier', fontSize: 12, letterSpacing: 1, flex: 1, textAlign: 'center' },
-  actions:      { flexDirection: 'row', borderTopWidth: 1 },
-  actionBtn:    { flex: 1, paddingVertical: 14, alignItems: 'center' },
-  actionDivider:{ width: 1 },
-  actionText:   { fontFamily: 'Courier', fontWeight: '700', fontSize: 11, letterSpacing: 2 },
-});
 
 export default function HomeScreen() {
   const theme = useTheme();
@@ -808,41 +727,6 @@ export default function HomeScreen() {
     '51002': swBuoy.data,
     '51004': seBuoy.data,
   };
-
-  const nearshoreHistory: Record<string, BuoyReading[]> = {
-    '51001': nwBuoy.history,
-    '51000': neBuoy.history,
-    '51208': hanalei.history,
-    '51201': waimeaBay.history,
-    '51205': pauwela.history,
-    '51212': barberspt.history,
-    '51206': hilo.history,
-    '51213': lanai.history,
-    '51002': swBuoy.history,
-    '51004': seBuoy.history,
-  };
-
-  const { activeStations } = useBuoyList();
-
-  // ── Overlay (historical compare) ──
-  const [overlayDate, setOverlayDate] = useState<Date | null>(null);
-  const [overlayPickerVisible, setOverlayPickerVisible] = useState(false);
-  const [overlayPickerDate, setOverlayPickerDate] = useState<Date>(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 1);
-    return d;
-  });
-  const adjustOverlayDate = useCallback((delta: number, unit: 'day' | 'hour') => {
-    setOverlayPickerDate(prev => {
-      const ms = unit === 'day' ? delta * 86_400_000 : delta * 3_600_000;
-      const next = new Date(prev.getTime() + ms);
-      if (next.getTime() > Date.now()) return new Date();
-      if (next.getTime() < Date.now() - 6 * 86_400_000) return prev; // max 6 days back
-      return next;
-    });
-  }, []);
-  const stationIdList = Object.keys(nearshoreData);
-  const { data: overlayData, loading: overlayLoading } = useHistoricalBuoyData(stationIdList, overlayDate);
 
   // ── Log session ──
   const { logSwell } = useSwellLogContext();
@@ -927,8 +811,7 @@ export default function HomeScreen() {
   // ── Double-tap → open Log Session modal ──
   const handleDoubleTap = useCallback(() => {
     if (pinchActiveRef.current) return;
-    // Snapshot only available on MAP (0) or DATA (1) screens
-    if (activeScreen !== 0 && activeScreen !== 1) return;
+    if (activeScreen !== 0) return;
     const now = Date.now();
     if (now - lastTapRef.current < 350) {
       lastTapRef.current = 0;
@@ -964,8 +847,9 @@ export default function HomeScreen() {
         windGustKt:   windData?.gust  ?? null,
         windDirDeg:   windData?.dir   ?? null,
         windDirLabel: windData?.dir != null ? getCardinalDirection(windData.dir) ?? null : null,
+        // Tide API already returns feet (units=english)
         tideHeightFt: nowTideHeight != null
-          ? Math.round(nowTideHeight * 3.28084 * 10) / 10
+          ? Math.round(nowTideHeight * 10) / 10
           : null,
         tideLabel: nowTideState || null,
       });
@@ -990,7 +874,7 @@ export default function HomeScreen() {
   }, []);
 
   const handleScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    // Virtual layout: [ghost-MIC, MAP, DATA, FORECAST, LOG, MIC, ghost-MAP]
+    // Virtual layout: [ghost-MIC, MAP, FORECAST, LOG, MIC, ghost-MAP]
     // virtual index 0 and REAL_PAGES both correspond to real page REAL_PAGES-1 (MIC)
     const virtualIndex = Math.round(e.nativeEvent.contentOffset.x / SCREEN_W);
     const realIndex = ((virtualIndex - 1) % REAL_PAGES + REAL_PAGES) % REAL_PAGES;
@@ -1055,7 +939,8 @@ export default function HomeScreen() {
       }
     >
       <BuoyGrid nearshoreData={nearshoreData} theme={theme} onBuoyPress={handleBuoyPress} />
-      <View style={{ height: TIDE_H, backgroundColor: theme.background, marginTop: -2 }}>
+      <View style={{ height: TIDE_H, marginTop: -2 }}>
+        <View style={{ position: 'absolute', top: 68, left: 0, right: 0, bottom: 0, backgroundColor: theme.background }} />
         <View style={{ height: WIND_INFO_H, justifyContent: 'center', alignItems: 'center', paddingBottom: 30, paddingTop: 80 }}>
           <WindTideBar
             windData={windData}
@@ -1133,7 +1018,7 @@ export default function HomeScreen() {
       )}
 
       {/* ── Horizontal pager (looping via ghost pages) ── */}
-      {/* Virtual layout: [ghost-MIC | MAP | DATA | FORECAST | LOG | MIC | ghost-MAP] */}
+      {/* Virtual layout: [ghost-MIC | MAP | FORECAST | LOG | MIC | ghost-MAP] */}
       <ScrollView
         ref={pagerRef}
         horizontal
@@ -1153,36 +1038,13 @@ export default function HomeScreen() {
             {/* Page 0 (MAP) */}
             {renderMapTidePage()}
 
-            {/* Page 1: Wave Data */}
-            <DataScreen
-              stations={activeStations}
-              nearshoreData={nearshoreData}
-              nearshoreHistory={nearshoreHistory}
-              overlayData={overlayData}
-              overlayDate={overlayDate}
-              overlayLoading={overlayLoading}
-              height={pagerHeight}
-              refreshing={isRefreshing}
-              onRefresh={handleRefresh}
-              theme={theme}
-              onBuoyPress={handleBuoyPress}
-              onEditPress={() => router.push('/buoys')}
-              onOverlayPress={() => {
-                setOverlayPickerDate(overlayDate ?? (() => {
-                  const d = new Date(); d.setDate(d.getDate() - 1); return d;
-                })());
-                setOverlayPickerVisible(true);
-              }}
-              onOverlayClear={() => setOverlayDate(null)}
-            />
-
-            {/* Page 2: Forecast */}
+            {/* Page 1: Forecast */}
             <ForecastPage height={pagerHeight} theme={theme} stationId={selectedStation.id} />
 
-            {/* Page 3: Log Book */}
+            {/* Page 2: Log Book */}
             <LogbookPage height={pagerHeight} theme={theme} />
 
-            {/* Page 4: Mic Wind */}
+            {/* Page 3: Mic Wind */}
             <MicWindScreen key="real-mic" height={pagerHeight} theme={theme} active={activeScreen === REAL_PAGES - 1} />
 
             {/* Ghost of first page — seen when swiping left on MIC */}
@@ -1217,16 +1079,6 @@ export default function HomeScreen() {
         onAdjust={adjustLogDate}
         onSave={handleSaveSession}
         onCancel={() => setLogModalVisible(false)}
-      />
-
-      <OverlayPickerModal
-        visible={overlayPickerVisible}
-        date={overlayPickerDate}
-        onAdjust={adjustOverlayDate}
-        onConfirm={() => { setOverlayDate(overlayPickerDate); setOverlayPickerVisible(false); }}
-        onClear={() => { setOverlayDate(null); setOverlayPickerVisible(false); }}
-        onCancel={() => setOverlayPickerVisible(false)}
-        theme={theme}
       />
 
       {/* Feedback toast */}

@@ -15,6 +15,7 @@ export interface NearshoreStation {
   labelOffsetX?: number;
   labelOffsetY?: number;
   arrowOffsetX?: number;
+  dotOffsetX?: number;
   dotOffsetY?: number;
   degOffsetY?: number;
   labelSide?: 'left' | 'right';
@@ -32,12 +33,12 @@ export const OFFSHORE_STATIONS: OffshoreStation[] = [
 export const NEARSHORE_STATIONS: NearshoreStation[] = [
   { id: '51001', name: 'NW BUOY',    lat: 24.475, lon: -162.030, timeTop: true, labelOffsetX: 4, labelSpacing: 12, degOffsetY: 4 },
   { id: '51000', name: 'NE BUOY',    lat: 23.773, lon: -153.859, timeTop: true },
-  { id: '51208', name: 'HANALEI',    lat: 22.285, lon: -159.574, timeTop: true, labelOffsetX: -28, arrowOffsetX: -10, labelSpacing: 14 },
-  { id: '51201', name: 'WAIMEA BAY', lat: 21.671, lon: -158.118, timeTop: true, labelOffsetX: 6, labelSpacing: 14 },
+  { id: '51208', name: 'HANALEI',    lat: 22.285, lon: -159.574, timeTop: true, labelOffsetX: -28, arrowOffsetX: -10, labelSpacing: 14, dotOffsetY: -5 },
+  { id: '51201', name: 'WAIMEA BAY', lat: 21.671, lon: -158.118, timeTop: true, labelOffsetX: 6, labelSpacing: 14, dotOffsetY: -5 },
   { id: '51205', name: 'PAUWELA',    lat: 21.018, lon: -156.421, timeTop: true, labelOffsetX: 14, labelSpacing: 14 },
-  { id: '51212', name: 'BARBERS PT', lat: 21.323, lon: -158.149, labelBelow: true, arrowOffsetX: -5, dotOffsetY: 3, degOffsetY: -3, labelSide: 'left', labelOffsetX: -6, labelOffsetY: 7, labelSpacing: 14 },
+  { id: '51212', name: 'BARBERS PT', lat: 21.323, lon: -158.149, labelBelow: true, arrowOffsetX: -5, dotOffsetX: -4, dotOffsetY: 6, degOffsetY: -3, labelSide: 'left', labelOffsetX: -6, labelOffsetY: 7, labelSpacing: 14 },
   { id: '51206', name: 'HILO',       lat: 19.779, lon: -154.970, timeTop: true, labelSide: 'right', labelOffsetX: 4, labelSpacing: 14 },
-  { id: '51213', name: 'LANAI',      lat: 20.750, lon: -157.002, labelBelow: true, labelOffsetX: 10, labelOffsetY: 14, labelSpacing: 14 },
+  { id: '51213', name: 'LANAI',      lat: 20.750, lon: -157.002, labelBelow: true, labelOffsetX: 10, labelOffsetY: 14, labelSpacing: 14, dotOffsetY: 5 },
   { id: '51002', name: 'SW BUOY',    lat: 17.079, lon: -157.510, labelBelow: true },
   { id: '51004', name: 'SE BUOY',    lat: 17.480, lon: -152.227, labelBelow: true },
 ];
