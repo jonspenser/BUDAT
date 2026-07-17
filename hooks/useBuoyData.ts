@@ -33,11 +33,28 @@ function deserializeRows(raw: BuoyReadingCached[]): BuoyReading[] {
   return raw.map(r => ({ ...r, timestamp: new Date(r.timestamp) }));
 }
 
-function parseMissing(val: number): number | null {
-  if (val >= 99 && (val === 99 || val === 999 || val === 9999 || val === 99.0 || val === 999.0 || val === 9999.0)) return null;
+// NDBC missing markers are per-field: realtime2 files use "MM" (→ NaN), but
+// numeric sentinels differ by column — a 99° direction or 999 hPa pressure
+// are real values, so only null out the sentinel that matches the field.
+const MISSING_MARKERS: Record<string, number> = {
+  WVHT: 99, SwH: 99, SwP: 99, WWH: 99, DPD: 99, APD: 99,
+  WSPD: 99, GST: 99,
+  WDIR: 999, MWD: 999, WWD: 999, SwD: 999,
+  ATMP: 999, WTMP: 999,
+  PRES: 9999,
+};
+
+function parseMissing(val: number, field: string): number | null {
   if (isNaN(val)) return null;
+  if (val === (MISSING_MARKERS[field] ?? 999)) return null;
   return val;
 }
+
+// .spec files report SwD/WWD as compass letters ("NNW"), not degrees
+const COMPASS_TO_DEG: Record<string, number> = {
+  N: 0, NNE: 22.5, NE: 45, ENE: 67.5, E: 90, ESE: 112.5, SE: 135, SSE: 157.5,
+  S: 180, SSW: 202.5, SW: 225, WSW: 247.5, W: 270, WNW: 292.5, NW: 315, NNW: 337.5,
+};
 
 function rowKey(YY: string, MM: string, DD: string, hh: string, mm: string): string {
   return `${YY}-${MM}-${DD}-${hh}-${mm}`;
@@ -75,7 +92,7 @@ function parseNOAAStandardData(text: string, stationId: string): BuoyReading[] {
     const get = (key: string): number | null => {
       const v = obj[key];
       if (!v) return null;
-      return parseMissing(parseFloat(v));
+      return parseMissing(parseFloat(v), key);
     };
 
     results.push({
@@ -138,10 +155,10 @@ function parseNOAASpecData(text: string): SpecRow[] {
       const v = obj[k];
       if (!v) return null;
       const n = parseFloat(v);
-      return parseMissing(n);
+      return parseMissing(n, k);
     };
 
-    rows.push({ ts, SwH: get('SwH'), SwP: get('SwP'), SwD: get('SwD'), WWH: get('WWH'), MWD: get('MWD') });
+    rows.push({ ts, SwH: get('SwH'), SwP: get('SwP'), SwD: COMPASS_TO_DEG[obj['SwD']] ?? null, WWH: get('WWH'), MWD: get('MWD') });
   }
 
   return rows;

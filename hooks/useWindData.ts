@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 
 export interface WindReading {
   stationId: string;
@@ -22,7 +22,9 @@ function parseWindTxt(text: string, stationId: string): WindReading | null {
     const i = headers.indexOf(key);
     if (i === -1 || i >= dataLine.length) return null;
     const v = parseFloat(dataLine[i]);
-    if (isNaN(v) || v === 99 || v === 999 || v === 9999) return null;
+    // NDBC missing sentinel: 999 for directions, 99 for speeds ("MM" → NaN)
+    const missing = key === 'WDIR' ? 999 : 99;
+    if (isNaN(v) || v === missing) return null;
     return v;
   };
 
@@ -53,23 +55,6 @@ export function useWindData(stationId: string) {
   const [fetchTick, setFetchTick] = useState(0);
 
   const refetch = () => setFetchTick(t => t + 1);
-
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`${NDBC_BASE}${stationId}.txt`, { cache: 'no-store' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const text = await res.text();
-      const parsed = parseWindTxt(text, stationId);
-      if (!parsed) throw new Error('Parse error');
-      setData(parsed);
-    } catch (e: any) {
-      setError(e.message ?? 'Fetch error');
-    } finally {
-      setLoading(false);
-    }
-  }, [stationId]);
 
   useEffect(() => {
     let cancelled = false;
