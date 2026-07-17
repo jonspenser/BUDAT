@@ -25,13 +25,24 @@ public final class SampleStore: @unchecked Sendable {
     }
 
     public func insertSession(_ session: SessionRecord) throws {
+        // Upsert, NOT "INSERT OR REPLACE": REPLACE deletes the existing row
+        // first, and with foreign_keys ON that cascade-deletes every
+        // feature_window and correction belonging to the session.
         let sql = """
-        INSERT OR REPLACE INTO sessions (
+        INSERT INTO sessions (
             id, started_at, ended_at, device_model, os_version, audio_route,
             sample_rate, buffer_size, sweep_bins_json, peak_heading_degrees,
             lobe_classification, lobe_sharpness, lobe_separation_degrees,
             lobe_confidence, capture_metadata_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            ended_at = excluded.ended_at,
+            sweep_bins_json = excluded.sweep_bins_json,
+            peak_heading_degrees = excluded.peak_heading_degrees,
+            lobe_classification = excluded.lobe_classification,
+            lobe_sharpness = excluded.lobe_sharpness,
+            lobe_separation_degrees = excluded.lobe_separation_degrees,
+            lobe_confidence = excluded.lobe_confidence;
         """
         try execute(sql) { statement in
             bind(statement, 1, session.id.uuidString)

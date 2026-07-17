@@ -20,8 +20,8 @@ final class WindMeterModule: RCTEventEmitter {
                               rejecter reject: @escaping RCTPromiseRejectBlock) {
         DispatchQueue.main.async {
             let ctrl = WindMeterController()
-            ctrl.onSweepUpdate = { [weak self] result, heading in
-                self?.sendSweepUpdate(result, currentHeadingDegrees: heading)
+            ctrl.onSweepUpdate = { [weak self] result, heading, levelDb in
+                self?.sendSweepUpdate(result, currentHeadingDegrees: heading, levelDb: levelDb)
             }
             ctrl.onHeadingUpdate = { [weak self] heading in
                 self?.sendHeadingUpdate(heading)
@@ -48,15 +48,19 @@ final class WindMeterModule: RCTEventEmitter {
         }
     }
 
-    @objc func submitCorrection(_ speedMS: Double,
+    @objc func submitCorrection(_ speedValue: Double,
                                 unit: String,
                                 readingType: String,
                                 directionDegrees: NSNumber?,
                                 resolver resolve: @escaping RCTPromiseResolveBlock,
                                 rejecter reject: @escaping RCTPromiseRejectBlock) {
         DispatchQueue.main.async {
-            self.controller?.submitCorrection(
-                speedMS: speedMS,
+            guard let controller = self.controller else {
+                reject("NOT_MEASURING", "Wind meter is not running — correction was not recorded", nil)
+                return
+            }
+            controller.submitCorrection(
+                speedValue: speedValue,
                 unit: unit,
                 readingType: readingType,
                 directionDegrees: directionDegrees?.doubleValue
@@ -65,9 +69,24 @@ final class WindMeterModule: RCTEventEmitter {
         }
     }
 
+    @objc func exportCalibrationData(_ resolve: @escaping RCTPromiseResolveBlock,
+                                     rejecter reject: @escaping RCTPromiseRejectBlock) {
+        DispatchQueue.main.async {
+            // Works with or without an active measurement — a temporary
+            // controller only opens the store, it doesn't start audio.
+            let controller = self.controller ?? WindMeterController()
+            do {
+                let url = try controller.exportCalibrationData()
+                resolve(url.path)
+            } catch {
+                reject("EXPORT_FAILED", error.localizedDescription, error)
+            }
+        }
+    }
+
     // MARK: - Private
 
-    private func sendSweepUpdate(_ result: SweepResult, currentHeadingDegrees: Double) {
+    private func sendSweepUpdate(_ result: SweepResult, currentHeadingDegrees: Double, levelDb: Double) {
         guard hasListeners else { return }
         var body: [String: Any] = [
             "guidance": result.guidance.rawValue,
@@ -75,6 +94,7 @@ final class WindMeterModule: RCTEventEmitter {
             "coverage": result.coverage,
             "lobeClassification": result.lobeClassification.rawValue,
             "currentHeadingDegrees": currentHeadingDegrees,
+            "levelDb": levelDb,
         ]
         if let peak = result.peakHeadingDegrees { body["peakHeadingDegrees"] = peak }
         if let locked = result.lockedHeadingDegrees { body["lockedHeadingDegrees"] = locked }

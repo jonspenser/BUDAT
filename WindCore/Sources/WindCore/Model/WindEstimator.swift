@@ -173,14 +173,19 @@ public struct WindEstimator: Codable, Equatable, Sendable {
         let meanY = pairs.map(\.1).reduce(0, +) / Double(pairs.count)
         let varianceX = pairs.map { pow($0.0 - meanX, 2) }.reduce(0, +)
         let covariance = pairs.map { ($0.0 - meanX) * ($0.1 - meanY) }.reduce(0, +)
-        let gain = varianceX > 1.0e-9 ? covariance / varianceX : 1
+        // Clamp: with few points a degenerate slope can send estimates to
+        // absurd values; a real mic-response correction stays near 1.
+        let rawGain = varianceX > 1.0e-9 ? covariance / varianceX : 1
+        let gain = max(0.25, min(4.0, rawGain))
         let bias = meanY - gain * meanX
         return DevicePersonalization(sampleCount: corrections.count, logBias: bias, logGain: gain)
     }
 }
 
 public func aggregateFeatureVector(_ windows: [FeatureWindowRecord]) -> [String: Double]? {
-    let usable = windows.filter { $0.qualityFlags.isEmpty || !$0.qualityFlags.contains(where: { $0.lowercased().contains("reject") }) }
+    // Any quality flag (clipping/agc/speech/handling) means contamination —
+    // only clean windows may train the model or feed estimates.
+    let usable = windows.filter { $0.qualityFlags.isEmpty }
     guard !usable.isEmpty else { return nil }
     let keys = Array(Set(usable.flatMap { $0.featureVector.keys })).sorted()
     var output: [String: Double] = [:]

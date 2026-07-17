@@ -27,6 +27,7 @@ export interface SweepUpdate {
   currentHeadingDegrees?: number;
   peakHeadingDegrees?: number;
   lockedHeadingDegrees?: number;
+  levelDb?: number;   // mic level (dBFS) for pan guidance
 }
 
 export interface EstimateUpdate {
@@ -59,14 +60,23 @@ export const WindMeter = {
     return WindMeterModule.stopMeasuring();
   },
 
+  /** Pass the speed exactly as the user entered it, with its unit — the
+   *  native side converts. Do NOT pre-convert to m/s. */
   submitCorrection(
-    speedMS: number,
+    speedValue: number,
     unit: 'ms' | 'knots' | 'mph',
     readingType: 'sustained' | 'gust' | 'average',
     directionDegrees?: number | null
   ): Promise<void> {
     if (!WindMeterModule) return Promise.reject(new Error(NO_MODULE));
-    return WindMeterModule.submitCorrection(speedMS, unit, readingType, directionDegrees ?? null);
+    return WindMeterModule.submitCorrection(speedValue, unit, readingType, directionDegrees ?? null);
+  },
+
+  /** Writes all logged sessions/windows/corrections as JSON-lines and
+   *  resolves with the file path (share or inspect for calibration). */
+  exportCalibrationData(): Promise<string> {
+    if (!WindMeterModule) return Promise.reject(new Error(NO_MODULE));
+    return WindMeterModule.exportCalibrationData();
   },
 
   onSweepUpdate(handler: (update: SweepUpdate) => void) {

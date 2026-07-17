@@ -8,15 +8,16 @@ import {
   Dimensions,
   ScrollView,
   Platform,
+  Switch,
 } from 'react-native';
 import Svg, { Circle, Path, Line, G, Text as SvgText } from 'react-native-svg';
 import * as Haptics from 'expo-haptics';
 import { Theme } from '../constants/colors';
 import { headingToCardinal } from '../hooks/useMicWind';
+import { saveWindReading, useWindReadings } from '../hooks/useWindReadings';
 import {
   WindMeter,
   msToKnots,
-  knotsToMs,
   SweepUpdate,
   EstimateUpdate,
   HeadingUpdate,
@@ -55,6 +56,21 @@ const GUIDANCE_LABEL: Record<SweepGuidance, string> = {
   locked: 'LOCKED',
   noLock: 'NO LOCK — TRY AGAIN',
 };
+
+// ── Mic-level pan guidance ─────────────────────────────────────────────────────
+// Fast/slow EMAs on the mic level; their difference gives the trend. Rising →
+// keep panning. Dropping before any rise → wrong way, flip. Dropping after a
+// rise → passed the peak, sweep back until the analyzer locks.
+const TREND_DB = 0.8;           // dB the fast EMA must diverge to count as a trend
+const FLIP_COOLDOWN_MS = 1500;  // min time between direction changes
+
+function fmtArchiveTime(iso: string): string {
+  const d = new Date(iso);
+  const h = d.getHours();
+  const mn = String(d.getMinutes()).padStart(2, '0');
+  const h12 = h % 12 || 12;
+  return `${d.getMonth() + 1}/${d.getDate()} ${h12}:${mn}${h >= 12 ? 'p' : 'a'}`;
+}
 
 function polarToXY(cx: number, cy: number, r: number, deg: number) {
   const rad = ((deg - 90) * Math.PI) / 180;
@@ -327,6 +343,7 @@ function ResultScreen({
       <Text style={[styles.resultKts, { color: theme.textPrimary }]}>
         {knots !== null ? Math.round(knots) : '--'} KT
       </Text>
+      <Text style={[styles.savedNote, { color: theme.muted }]}>✓ SAVED TO READINGS ARCHIVE</Text>
       <TouchableOpacity
         style={[styles.button, { borderColor: theme.accent, backgroundColor: 'transparent', marginTop: 48 }]}
         onPress={onReset}
@@ -363,11 +380,45 @@ export default function MicWindScreen({ theme, height, active = true }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [correctionInput, setCorrectionInput] = useState('');
   const [directionInput, setDirectionInput] = useState('');
+  const [panMsg, setPanMsg] = useState<string | null>(null);
+  const [archiveTick, setArchiveTick] = useState(0);
+  const readings = useWindReadings(archiveTick);
 
   const trainingRef = useRef(false);
   const estimateRef = useRef<EstimateUpdate | null>(null);
   const sweepRef = useRef<SweepUpdate | null>(null);
   const subsRef = useRef<{ remove: () => void }[]>([]);
+  const savedRef = useRef(false);
+  // Pan-guidance trend state
+  const fastEmaRef = useRef<number | null>(null);
+  const slowEmaRef = useRef<number | null>(null);
+  const panDirRef = useRef<'LEFT' | 'RIGHT'>('LEFT');
+  const hasRisenRef = useRef(false);
+  const lastFlipRef = useRef(0);
+
+  const handleLevel = useCallback((db: number) => {
+    const fast = fastEmaRef.current === null ? db : fastEmaRef.current + 0.35 * (db - fastEmaRef.current);
+    const slow = slowEmaRef.current === null ? db : slowEmaRef.current + 0.06 * (db - slowEmaRef.current);
+    fastEmaRef.current = fast;
+    slowEmaRef.current = slow;
+    const trend = fast - slow;
+    const now = Date.now();
+
+    if (trend > TREND_DB) {
+      hasRisenRef.current = true;
+      setPanMsg(`LEVEL RISING — KEEP PANNING ${panDirRef.current}`);
+    } else if (trend < -TREND_DB && now - lastFlipRef.current > FLIP_COOLDOWN_MS) {
+      lastFlipRef.current = now;
+      const flipped = panDirRef.current === 'LEFT' ? 'RIGHT' : 'LEFT';
+      panDirRef.current = flipped;
+      if (hasRisenRef.current) {
+        hasRisenRef.current = false;
+        setPanMsg(`PASSED THE PEAK — PAN BACK ${flipped} SLOWLY`);
+      } else {
+        setPanMsg(`LEVEL DROPPING — STOP, PAN ${flipped}`);
+      }
+    }
+  }, []);
 
   const stopListeners = useCallback(() => {
     subsRef.current.forEach(s => s?.remove?.());
@@ -391,12 +442,23 @@ export default function MicWindScreen({ theme, height, active = true }: Props) {
     setLiveHeading(null);
     estimateRef.current = null;
     sweepRef.current = null;
+    savedRef.current = false;
+    // Reset pan guidance: always begin panning left
+    fastEmaRef.current = null;
+    slowEmaRef.current = null;
+    panDirRef.current = 'LEFT';
+    hasRisenRef.current = false;
+    lastFlipRef.current = 0;
+    setPanMsg('PAN LEFT SLOWLY');
     setMeasureState('sweeping');
 
     const headingSub = WindMeter.onHeadingUpdate(update => setLiveHeading(update));
     const sweepSub = WindMeter.onSweepUpdate(update => {
       sweepRef.current = update;
       setSweep(update);
+      if (typeof update.levelDb === 'number' && !update.isLocked) {
+        handleLevel(update.levelDb);
+      }
       if (update.isLocked) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
         if (trainingRef.current) {
@@ -411,6 +473,18 @@ export default function MicWindScreen({ theme, height, active = true }: Props) {
           );
           setMeasureState('calibrating');
         } else {
+          // Enough data — archive the reading and show the result
+          if (!savedRef.current) {
+            savedRef.current = true;
+            const est = estimateRef.current;
+            const hdg = update.lockedHeadingDegrees ?? update.peakHeadingDegrees ?? null;
+            saveWindReading({
+              timestamp: new Date().toISOString(),
+              knots: est?.speedMS != null ? Math.round(msToKnots(est.speedMS) * 10) / 10 : null,
+              headingDeg: hdg,
+              cardinal: hdg != null ? headingToCardinal(hdg) : null,
+            }).then(() => setArchiveTick(t => t + 1));
+          }
           setMeasureState('locked');
         }
       }
@@ -432,7 +506,7 @@ export default function MicWindScreen({ theme, height, active = true }: Props) {
       setMeasureState('idle');
       setError(e?.message ?? 'Could not start microphone');
     }
-  }, [stopListeners]);
+  }, [stopListeners, handleLevel]);
 
   const handleStop = useCallback(async () => {
     await stopMeasuring();
@@ -467,7 +541,8 @@ export default function MicWindScreen({ theme, height, active = true }: Props) {
     }
     setError(null);
     try {
-      await WindMeter.submitCorrection(knotsToMs(val), 'knots', 'sustained', dir === 360 ? 0 : dir);
+      // Raw knots as entered — the native layer converts and records the unit
+      await WindMeter.submitCorrection(val, 'knots', 'sustained', dir === 360 ? 0 : dir);
     } catch {}
     trainingRef.current = false;
     await stopMeasuring();
@@ -578,56 +653,63 @@ export default function MicWindScreen({ theme, height, active = true }: Props) {
       style={[styles.container, { backgroundColor: theme.background, width: W, height, transform: [{ rotate: '180deg' }] }]}
       contentContainerStyle={styles.content}
     >
-      <Text style={[styles.title, { color: theme.accent }]}>ANEMOMETER</Text>
-      <View style={[styles.divider, { backgroundColor: theme.accent }]} />
+      {/* Dim everything except the switch while off */}
+      <View style={[styles.dimWrap, !isRecording && styles.dimmed]}>
+        <Text style={[styles.title, { color: theme.accent }]}>ANEMOMETER</Text>
+        <View style={[styles.divider, { backgroundColor: theme.accent }]} />
 
-      <WindGauge beaufortFractional={beaufortFractional} isRecording={isRecording} theme={theme} />
+        <WindGauge beaufortFractional={beaufortFractional} isRecording={isRecording} theme={theme} />
 
-      <BeaufortBar beaufortFractional={beaufortFractional} isRecording={isRecording} theme={theme} />
+        <BeaufortBar beaufortFractional={beaufortFractional} isRecording={isRecording} theme={theme} />
 
-      <View style={styles.bfLabelRow}>
-        <Text style={[styles.bfLabelEdge, { color: theme.muted }]}>B0</Text>
-        <Text style={[styles.bfLabelEdge, { color: theme.muted }]}>B8</Text>
+        <View style={styles.bfLabelRow}>
+          <Text style={[styles.bfLabelEdge, { color: theme.muted }]}>B0</Text>
+          <Text style={[styles.bfLabelEdge, { color: theme.muted }]}>B8</Text>
+        </View>
+
+        {/* Speed readout */}
+        <View style={styles.readout}>
+          <Text style={[styles.speedValue, { color: isRecording ? theme.textPrimary : theme.accentDim }]}>
+            {knotsText}
+          </Text>
+          <Text style={[styles.speedUnit, { color: theme.muted }]}>KT</Text>
+        </View>
+
+        {isRecording && lower !== null && upper !== null && (
+          <Text style={[styles.rangeText, { color: theme.muted }]}>{lower} – {upper} KT</Text>
+        )}
+
+        <View style={styles.beaufortLabelWrap}>
+          <Text style={[styles.beaufortNumber, { color: theme.accent }]}>
+            {isRecording ? `B${bfIndex}` : '--'}
+          </Text>
+          <Text style={[styles.beaufortLabel, { color: theme.textPrimary }]}>
+            {isRecording ? BF_LABELS[bfIndex] : 'NOT MEASURING'}
+          </Text>
+        </View>
       </View>
 
-      {/* Speed readout */}
-      <View style={styles.readout}>
-        <Text style={[styles.speedValue, { color: isRecording ? theme.textPrimary : theme.accentDim }]}>
-          {knotsText}
+      {/* Measure on/off switch */}
+      <View style={styles.switchRow}>
+        <Text style={[styles.switchLabel, { color: isRecording ? theme.accent : theme.muted }]}>
+          {isRecording ? 'MEASURING' : 'MEASURE'}
         </Text>
-        <Text style={[styles.speedUnit, { color: theme.muted }]}>KT</Text>
-      </View>
-
-      {isRecording && lower !== null && upper !== null && (
-        <Text style={[styles.rangeText, { color: theme.muted }]}>{lower} – {upper} KT</Text>
-      )}
-
-      <View style={styles.beaufortLabelWrap}>
-        <Text style={[styles.beaufortNumber, { color: theme.accent }]}>
-          {isRecording ? `B${bfIndex}` : '--'}
-        </Text>
-        <Text style={[styles.beaufortLabel, { color: theme.textPrimary }]}>
-          {isRecording ? BF_LABELS[bfIndex] : 'NOT MEASURING'}
-        </Text>
+        <Switch
+          value={isRecording}
+          onValueChange={v => { v ? startMeasurement(false) : handleStop(); }}
+          trackColor={{ false: theme.accentDim, true: theme.accent }}
+          ios_backgroundColor={theme.accentDim}
+        />
       </View>
 
       {measureState === 'idle' && (
-        <>
-          <TouchableOpacity
-            style={[styles.button, { borderColor: theme.accent, backgroundColor: 'transparent' }]}
-            onPress={() => startMeasurement(false)}
-            activeOpacity={0.7}
-          >
-            <Text style={[styles.buttonText, { color: theme.accent }]}>TAKE MEASUREMENT</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.button, styles.buttonSecondary, { borderColor: theme.accentDim }]}
-            onPress={() => startMeasurement(true)}
-            activeOpacity={0.7}
-          >
-            <Text style={[styles.buttonText, { color: theme.accentDim, fontSize: 12 }]}>CALIBRATE</Text>
-          </TouchableOpacity>
-        </>
+        <TouchableOpacity
+          style={[styles.button, styles.buttonSecondary, styles.dimmed, { borderColor: theme.accentDim }]}
+          onPress={() => startMeasurement(true)}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.buttonText, { color: theme.accentDim, fontSize: 12 }]}>CALIBRATE</Text>
+        </TouchableOpacity>
       )}
 
       {/* ── Direction sweep section ── */}
@@ -649,29 +731,39 @@ export default function MicWindScreen({ theme, height, active = true }: Props) {
                 </>
               ) : (
                 <Text style={[styles.dirPrompt, { color: theme.muted }]}>
-                  {GUIDANCE_LABEL[sweep?.guidance ?? 'keepSweeping']}
+                  {panMsg ?? GUIDANCE_LABEL[sweep?.guidance ?? 'keepSweeping']}
                 </Text>
               )}
             </View>
           </View>
 
-          <Text style={[styles.guidanceText, { color: theme.muted }]}>
-            {GUIDANCE_LABEL[sweep?.guidance ?? 'keepSweeping']}
+          <Text style={[styles.guidanceText, { color: theme.accent }]}>
+            {panMsg ?? GUIDANCE_LABEL[sweep?.guidance ?? 'keepSweeping']}
             {sweep && !sweep.isLocked ? ` · ${Math.round((sweep.coverage ?? 0) * 100)}%` : ''}
           </Text>
-
-          <TouchableOpacity
-            style={[styles.button, styles.buttonSecondary, { borderColor: theme.accentDim, alignSelf: 'center' }]}
-            onPress={handleStop}
-            activeOpacity={0.7}
-          >
-            <Text style={[styles.buttonText, { color: theme.accentDim, fontSize: 12 }]}>STOP</Text>
-          </TouchableOpacity>
         </View>
       )}
 
       {error && (
         <Text style={[styles.error, { color: theme.accent }]}>{error}</Text>
+      )}
+
+      {/* Readings archive */}
+      {measureState === 'idle' && readings.length > 0 && (
+        <View style={[styles.archiveSection, styles.dimmed, { borderTopColor: theme.accentDim }]}>
+          <Text style={[styles.archiveTitle, { color: theme.accent }]}>READINGS ARCHIVE</Text>
+          {readings.slice(0, 5).map(r => (
+            <View key={r.id} style={styles.archiveRow}>
+              <Text style={[styles.archiveTime, { color: theme.muted }]}>{fmtArchiveTime(r.timestamp)}</Text>
+              <Text style={[styles.archiveVal, { color: theme.textPrimary }]}>
+                {r.knots != null ? `${Math.round(r.knots)}KT` : '--'}
+              </Text>
+              <Text style={[styles.archiveVal, { color: theme.textPrimary }]}>
+                {r.cardinal ?? '--'}{r.headingDeg != null ? ` ${Math.round(r.headingDeg)}°` : ''}
+              </Text>
+            </View>
+          ))}
+        </View>
       )}
 
     </ScrollView>
@@ -705,6 +797,10 @@ const styles = StyleSheet.create({
   dirPrompt: { fontSize: 11, fontFamily: 'Courier', letterSpacing: 1, lineHeight: 18 },
   guidanceText: { fontSize: 10, fontFamily: 'Courier', letterSpacing: 2, textAlign: 'center', marginBottom: 4 },
   error: { fontSize: 12, fontFamily: 'Courier', letterSpacing: 1, marginTop: 10, textAlign: 'center' },
+  dimWrap: { alignSelf: 'stretch', alignItems: 'center' },
+  dimmed: { opacity: 0.3 },
+  switchRow: { flexDirection: 'row', alignItems: 'center', gap: 16, marginTop: 26 },
+  switchLabel: { fontSize: 13, fontFamily: 'Courier', fontWeight: '900', letterSpacing: 3 },
   button: { marginTop: 28, paddingVertical: 14, paddingHorizontal: 40, borderWidth: 2, borderRadius: 4 },
   buttonSecondary: { marginTop: 12, paddingVertical: 10, paddingHorizontal: 28, borderWidth: 1 },
   buttonText: { fontSize: 15, fontFamily: 'Courier', fontWeight: '900', letterSpacing: 4 },
@@ -729,4 +825,11 @@ const styles = StyleSheet.create({
   resultCard: { fontSize: 42, fontFamily: 'Courier', fontWeight: '900', letterSpacing: 4, marginTop: 4 },
   resultDivider: { height: 1, width: 120, opacity: 0.4, marginVertical: 24 },
   resultKts: { fontSize: 52, fontFamily: 'Courier', fontWeight: '900', letterSpacing: 2 },
+  savedNote: { fontSize: 10, fontFamily: 'Courier', letterSpacing: 2, marginTop: 14 },
+  // Readings archive
+  archiveSection: { alignSelf: 'stretch', marginTop: 28, paddingTop: 14, borderTopWidth: 1 },
+  archiveTitle: { fontSize: 11, fontFamily: 'Courier', fontWeight: '700', letterSpacing: 3, marginBottom: 8 },
+  archiveRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 },
+  archiveTime: { fontFamily: 'Courier', fontSize: 11, letterSpacing: 0.5, flex: 1.6 },
+  archiveVal: { fontFamily: 'Courier', fontSize: 11, fontWeight: '600', letterSpacing: 0.5, flex: 1, textAlign: 'right' },
 });

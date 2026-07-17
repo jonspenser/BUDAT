@@ -582,7 +582,7 @@
 /* Begin XCLocalSwiftPackageReference section */
 		WM00000000000000000008AA /* XCLocalSwiftPackageReference "WindCore" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = "../../WindCore";
+			relativePath = "../WindCore";
 		};
 /* End XCLocalSwiftPackageReference section */
 

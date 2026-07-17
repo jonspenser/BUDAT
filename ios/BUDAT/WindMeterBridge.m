@@ -9,11 +9,14 @@ RCT_EXTERN_METHOD(startMeasuring:(RCTPromiseResolveBlock)resolve
 RCT_EXTERN_METHOD(stopMeasuring:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
-RCT_EXTERN_METHOD(submitCorrection:(double)speedMS
+RCT_EXTERN_METHOD(submitCorrection:(double)speedValue
                   unit:(NSString *)unit
                   readingType:(NSString *)readingType
                   directionDegrees:(nullable NSNumber *)directionDegrees
                   resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(exportCalibrationData:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
 @end
