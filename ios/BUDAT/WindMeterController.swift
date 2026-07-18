@@ -15,7 +15,7 @@ final class WindMeterController {
     private var captureEngine: AudioCaptureEngine?
     private let featureExtractor = FeatureExtractor()
     private let sweepAnalyzer = SweepAnalyzer()
-    private var windEstimator = WindEstimator()
+    private var windEstimator = WindEstimator.withDefaultPrior()
     private let headingProvider = DeviceHeadingProvider()
     private let modelQueue = DispatchQueue(label: "WindMeter.model")
 
@@ -292,7 +292,9 @@ final class WindMeterController {
             self?.onSweepUpdate?(sweepResult, heading, levelDb)
         }
 
-        if sweepResult.isLocked, let estimate = latestEstimate() {
+        // Live estimate on every clean window (not just after lock) so the
+        // speed readout tracks the wind while the user is still sweeping.
+        if let estimate = latestEstimate() {
             DispatchQueue.main.async { [weak self] in
                 self?.onEstimateUpdate?(estimate)
             }

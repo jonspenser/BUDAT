@@ -68,13 +68,61 @@ public struct WindEstimator: Codable, Equatable, Sendable {
         try priorModel.fit(samples)
     }
 
+    /// An estimator whose prior is fit to the field-proven mic-level → wind-speed
+    /// curve from the original JS meter, so it produces readings out of the box;
+    /// calibration corrections then personalize on top of it.
+    public static func withDefaultPrior() -> WindEstimator {
+        // dBFS → knots at the original DB_BREAKPOINTS (Beaufort lower bounds);
+        // both source mappings were piecewise linear, so these vertices are exact.
+        let curve: [(db: Double, knots: Double)] = [
+            (-58, 0), (-43, 1), (-35, 4), (-28, 7),
+            (-21, 11), (-12, 17), (-5, 22), (-2, 28), (0, 34),
+        ]
+        func knots(at db: Double) -> Double {
+            if db <= curve[0].db { return curve[0].knots }
+            for i in 1..<curve.count where db <= curve[i].db {
+                let (d0, k0) = curve[i - 1]
+                let (d1, k1) = curve[i]
+                return k0 + (db - d0) / (d1 - d0) * (k1 - k0)
+            }
+            return curve[curve.count - 1].knots
+        }
+        let knotsToMS = 0.514444
+        let samples = stride(from: -70.0, through: 3.0, by: 1.0).map { db in
+            BayesianRidgeSample(
+                features: Self.augmented(["rmsDb": db]),
+                targetSpeedMetersPerSecond: knots(at: db) * knotsToMS
+            )
+        }
+        var estimator = WindEstimator()
+        try? estimator.priorModel.fit(samples)
+        return estimator
+    }
+
+    /// Derived level features appended before every fit/predict so the prior
+    /// (trained on the dB curve) and runtime feature vectors share keys.
+    /// `rmsDb` is clamped to the curve's fitted range so the quadratic term
+    /// cannot extrapolate wildly on silence or clipping.
+    static func augmented(_ features: [String: Double]) -> [String: Double] {
+        var output = features
+        if output["rmsDb"] == nil, let rms = output["rms"] {
+            output["rmsDb"] = 20 * log10(max(rms, 1e-9))
+        }
+        if let db = output["rmsDb"] {
+            let clamped = min(max(db, -70), 3)
+            output["rmsDb"] = clamped
+            output["rmsDbSquared"] = clamped * clamped
+        }
+        return output
+    }
+
     public mutating func refitPersonalization(corrections: [CorrectionRecord], windows: [FeatureWindowRecord], deviceID: String) throws {
         let windowsBySession = Dictionary(grouping: windows, by: \.sessionID)
         let samples = corrections.compactMap { correction -> BayesianRidgeSample? in
             guard let featureVector = aggregateFeatureVector(windowsBySession[correction.sessionID] ?? []) else {
                 return nil
             }
-            return BayesianRidgeSample(features: featureVector, targetSpeedMetersPerSecond: correction.speedMetersPerSecond)
+            return BayesianRidgeSample(features: Self.augmented(featureVector), targetSpeedMetersPerSecond: correction.speedMetersPerSecond)
         }
         try personalizedModel.fit(samples)
         personalizationByDevice[deviceID] = fitBiasGain(corrections: corrections)
@@ -105,13 +153,14 @@ public struct WindEstimator: Codable, Equatable, Sendable {
         }
 
         let device = personalizationByDevice[deviceID] ?? DevicePersonalization()
+        let augmentedFeatures = Self.augmented(features)
         let prediction: BayesianRidgePrediction?
         let baseStatus: WindEstimatorStatus
         if device.sampleCount >= personalizationThreshold, personalizedModel.isFitted {
-            prediction = personalizedModel.predict(features: features)
+            prediction = personalizedModel.predict(features: augmentedFeatures)
             baseStatus = .personalized
         } else {
-            prediction = priorModel.predict(features: features)
+            prediction = priorModel.predict(features: augmentedFeatures)
             baseStatus = .priorDominated
         }
 
@@ -130,10 +179,12 @@ public struct WindEstimator: Codable, Equatable, Sendable {
         let confidence = max(0, min(1, 1 - bandWidth / maxConfidenceBandWidthMetersPerSecond))
         let status: WindEstimatorStatus = bandWidth > maxConfidenceBandWidthMetersPerSecond ? .lowConfidence : baseStatus
 
+        // A wide band lowers the reported confidence but must not hide the
+        // central estimate — the prior's bands start wide by construction.
         return WindEstimate(
-            speedMetersPerSecond: status == .lowConfidence ? nil : adjusted.speedMetersPerSecond,
-            lower95MetersPerSecond: status == .lowConfidence ? nil : adjusted.lower95MetersPerSecond,
-            upper95MetersPerSecond: status == .lowConfidence ? nil : adjusted.upper95MetersPerSecond,
+            speedMetersPerSecond: adjusted.speedMetersPerSecond,
+            lower95MetersPerSecond: adjusted.lower95MetersPerSecond,
+            upper95MetersPerSecond: adjusted.upper95MetersPerSecond,
             confidence: confidence,
             status: status
         )
