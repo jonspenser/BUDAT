@@ -363,7 +363,11 @@ public final class DeviceHeadingProvider {
     public func start(updateInterval: TimeInterval = 1.0 / 30.0) {
         guard manager.isDeviceMotionAvailable else { return }
         manager.deviceMotionUpdateInterval = updateInterval
-        manager.startDeviceMotionUpdates(using: .xMagneticNorthZVertical, to: .main) { [weak self] motion, _ in
+        let available = CMMotionManager.availableAttitudeReferenceFrames()
+        let referenceFrame: CMAttitudeReferenceFrame = available.contains(.xMagneticNorthZVertical)
+            ? .xMagneticNorthZVertical
+            : .xArbitraryCorrectedZVertical
+        manager.startDeviceMotionUpdates(using: referenceFrame, to: .main) { [weak self] motion, _ in
             guard let motion, motion.heading >= 0 else { return }
             self?.onHeading?(motion.heading, motion.timestamp)
         }

@@ -8,6 +8,7 @@ export interface WindArchiveReading {
   id: string;
   timestamp: string;         // ISO
   knots: number | null;      // null when the estimator had no speed
+  gustKnots: number | null;  // peak speed observed during the hold dwell; null if unavailable
   headingDeg: number | null; // wind-from direction
   cardinal: string | null;
 }

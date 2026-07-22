@@ -17,26 +17,36 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  PanResponder,
 } from 'react-native';
 import Svg, { Polygon, Circle, Path } from 'react-native-svg';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { NEARSHORE_STATIONS } from '../constants/buoys';
 import { isOffline, getCardinalDirection } from '../constants/formatters';
 import { HAWAII_STATIONS } from '../constants/hawaiiStations';
 import { useBuoyData, BuoyReading } from '../hooks/useBuoyData';
 import { useTideData } from '../hooks/useTideData';
 import { useWindData } from '../hooks/useWindData';
+import { useHistoricalData } from '../hooks/useHistoricalData';
 import { useTheme } from '../hooks/useTheme';
 import { useSelectedStation } from '../hooks/useSelectedStation';
 import { useSwellLogContext } from '../contexts/SwellLogContext';
 import { getMoonPhase } from '../hooks/useSwellLog';
 import HawaiiMap from '../components/HawaiiMap';
+import HistoricalDateEntry, { HistoricalDate } from '../components/HistoricalDateEntry';
 import TideChart from '../components/TideChart';
 import { LogbookPage } from './logbook';
 import { ForecastPage } from './forecast';
 import MicWindScreen from '../components/MicWindScreen';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
-const TIDE_H = Math.floor(SCREEN_H * 0.38);
+// Boundary between the map and the tide/wind section below it. The map's
+// projected island art is taller than its share of the page, so it gets
+// vertically cropped — a smaller fraction here gives the map more room
+// (moving this boundary down) so bottom-anchored labels like SW BUOY's
+// timestamp aren't clipped. TideChart has its own height floor, so shrinking
+// this doesn't break the chart.
+const TIDE_H = Math.floor(SCREEN_H * 0.33);
 const WIND_INFO_H = 160;
 const WIND_ARROW = 40;
 
@@ -99,6 +109,18 @@ function utcMinsToHawaii(utcMins: number): string {
 // Hawaii approximate center lat/lon (Oahu)
 const HI_LAT = 20.9;
 const HI_LON = -157.7;
+
+// ── Historical mode ────────────────────────────────────────────────────────────
+const MIN_HISTORICAL_YEAR = 2004;
+const MAX_HISTORICAL_YEAR = new Date().getFullYear() - 1; // NDBC only publishes completed years
+
+function formatHistoricalWatermark(d: HistoricalDate): string {
+  const base = `${d.month}/${d.day}/${d.year}`;
+  if (d.hour == null) return base;
+  const isPm = d.hour >= 12;
+  const h12 = d.hour % 12 || 12;
+  return `${base} ${h12}${isPm ? 'p' : 'a'}`;
+}
 
 // ── Moon phase & rise ─────────────────────────────────────────────────────────
 
@@ -268,7 +290,9 @@ interface WindTideBarProps {
 function WindTideBar({ windData, tideStation, nowTideHeight, nowTideLabel, onStationPress, theme, dayOffset = 0 }: WindTideBarProps) {
   const dir = windData?.dir ?? null;
   const speed = windData?.speed ?? null;
-  const travelDeg = dir !== null ? (dir + 180) % 360 : null;
+  // NDBC wind direction is already "coming from" — point the arrow straight
+  // at it (unlike the swell arrows, which add 180° to show travel direction).
+  const fromDeg = dir;
   const kts = speed !== null ? `${Math.round(speed)}kt` : '--';
 
   const moonDate = new Date(Date.now() + dayOffset * 24 * 3600_000);
@@ -296,8 +320,8 @@ function WindTideBar({ windData, tideStation, nowTideHeight, nowTideLabel, onSta
         <View style={windTideStyles.col}>
           <Text style={[windTideStyles.label, { color: '#2d6099' }]}>WIND</Text>
           <Svg width={WIND_ARROW} height={WIND_ARROW}>
-            {travelDeg !== null ? (
-              <Polygon points={arrowPoints(WIND_ARROW / 2, WIND_ARROW / 2, WIND_ARROW, travelDeg)} fill={theme.accent} />
+            {fromDeg !== null ? (
+              <Polygon points={arrowPoints(WIND_ARROW / 2, WIND_ARROW / 2, WIND_ARROW, fromDeg)} fill={theme.accent} />
             ) : (
               <Circle cx={WIND_ARROW / 2} cy={WIND_ARROW / 2} r={6} fill={theme.muted} />
             )}
@@ -448,14 +472,73 @@ interface BuoyGridProps {
   nearshoreData: Record<string, BuoyReading | null>;
   theme: ReturnType<typeof useTheme>;
   onBuoyPress: (id: string) => void;
+  historicalMode?: boolean;
+  historicalDate?: HistoricalDate;
+  historicalLoading?: boolean;
+  onHistoricalDateChange?: (date: HistoricalDate) => void;
+  onHistoricalReveal?: () => void;
 }
 
-function BuoyGrid({ nearshoreData, theme, onBuoyPress }: BuoyGridProps) {
+function BuoyGrid({
+  nearshoreData,
+  theme,
+  onBuoyPress,
+  historicalMode,
+  historicalDate,
+  historicalLoading,
+  onHistoricalDateChange,
+  onHistoricalReveal,
+}: BuoyGridProps) {
   const [mapH, setMapH] = useState(300);
+  // The date-entry panel can be swiped away to see the full map, then pulled
+  // back with the tab. Re-show it each time HIST mode is (re)entered.
+  const [entryVisible, setEntryVisible] = useState(true);
+  const revealTriggeredRef = useRef(false);
+  useEffect(() => {
+    if (historicalMode) setEntryVisible(true);
+  }, [historicalMode]);
+
+  const hidePan = useMemo(
+    () =>
+      Gesture.Pan()
+        .runOnJS(true)
+        .activeOffsetY([-1000, 8])
+        .failOffsetX([-16, 16])
+        .onEnd(e => {
+          if (e.translationY > 24 || e.velocityY > 500) setEntryVisible(false);
+        }),
+    []
+  );
+
+  const revealPan = useMemo(() => PanResponder.create({
+    onPanResponderGrant: () => {
+      revealTriggeredRef.current = false;
+    },
+    onMoveShouldSetPanResponderCapture: (_event, gesture) =>
+      gesture.numberActiveTouches === 1 &&
+      gesture.dy < -10 &&
+      Math.abs(gesture.dy) > Math.abs(gesture.dx) * 1.15,
+    onPanResponderMove: (_event, gesture) => {
+      if (gesture.dy < -30 && !revealTriggeredRef.current) {
+        revealTriggeredRef.current = true;
+        setEntryVisible(true);
+        onHistoricalReveal?.();
+      }
+    },
+    onPanResponderRelease: (_event, gesture) => {
+      if (gesture.dy < -30 && !revealTriggeredRef.current) {
+        revealTriggeredRef.current = true;
+        setEntryVisible(true);
+        onHistoricalReveal?.();
+      }
+    },
+  }), [onHistoricalReveal]);
+
   return (
     <View
       style={{ flex: 1 }}
       onLayout={e => setMapH(e.nativeEvent.layout.height)}
+      {...revealPan.panHandlers}
     >
       <HawaiiMap
         width={SCREEN_W}
@@ -464,10 +547,97 @@ function BuoyGrid({ nearshoreData, theme, onBuoyPress }: BuoyGridProps) {
         nearshoreData={nearshoreData}
         theme={theme}
         onBuoyPress={onBuoyPress}
+        isHistorical={historicalMode}
+        historicalLoading={historicalLoading}
       />
+      {historicalMode && (
+        <>
+          <View style={historicalStyles.watermarkWrap} pointerEvents="none">
+            <Text style={[historicalStyles.watermark, { color: theme.accent }]}>
+              {historicalDate ? formatHistoricalWatermark(historicalDate) : ''}
+            </Text>
+          </View>
+          {entryVisible ? (
+            <View style={[historicalStyles.entryWrap, { backgroundColor: theme.background + 'cc' }]}>
+              <GestureDetector gesture={hidePan}>
+                <View style={historicalStyles.handleBar} hitSlop={{ top: 8, bottom: 8 }}>
+                  <View style={[historicalStyles.handle, { backgroundColor: theme.accentDim }]} />
+                </View>
+              </GestureDetector>
+              <HistoricalDateEntry
+                date={historicalDate ?? { year: MAX_HISTORICAL_YEAR, month: 1, day: 1 }}
+                minYear={MIN_HISTORICAL_YEAR}
+                maxYear={MAX_HISTORICAL_YEAR}
+                onDateChange={onHistoricalDateChange ?? (() => {})}
+                theme={theme}
+              />
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={[historicalStyles.revealTab, { backgroundColor: theme.background + 'cc', borderColor: theme.accentDim }]}
+              onPress={() => setEntryVisible(true)}
+              activeOpacity={0.7}
+            >
+              <Text style={[historicalStyles.revealText, { color: theme.accent }]}>▲ DATE</Text>
+            </TouchableOpacity>
+          )}
+        </>
+      )}
     </View>
   );
 }
+
+const historicalStyles = StyleSheet.create({
+  watermarkWrap: {
+    position: 'absolute',
+    top: 6,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
+  watermark: {
+    fontFamily: 'Courier',
+    fontWeight: '900',
+    fontSize: 34,
+    letterSpacing: 4,
+    opacity: 0.14,
+  },
+  entryWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(128,128,128,0.3)',
+  },
+  handleBar: {
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  handle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    opacity: 0.8,
+  },
+  revealTab: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  revealText: {
+    fontFamily: 'Courier',
+    fontWeight: '900',
+    fontSize: 11,
+    letterSpacing: 3,
+  },
+});
 
 const SCREEN_LABELS = ['MAP', 'FORECAST', 'LOG', 'MIC'] as const;
 const REAL_PAGES = SCREEN_LABELS.length; // 4
@@ -728,10 +898,21 @@ export default function HomeScreen() {
     '51004': seBuoy.data,
   };
 
+  // ── Historical mode ──
+  const [historicalMode, setHistoricalMode] = useState(false);
+  const revealHistorical = useCallback(() => setHistoricalMode(true), []);
+  const [historicalDate, setHistoricalDate] = useState<HistoricalDate>(() => {
+    // Default: today's month/day in the most recent archived year
+    const hiNow = new Date(Date.now() - 10 * 3600000);
+    return { year: MAX_HISTORICAL_YEAR, month: hiNow.getUTCMonth() + 1, day: hiNow.getUTCDate() };
+  });
+  const nearshoreIds = useMemo(() => NEARSHORE_STATIONS.map(s => s.id), []);
+  const { data: historicalData, loading: historicalLoading } =
+    useHistoricalData(nearshoreIds, historicalMode ? historicalDate : null);
+  const displayedNearshoreData = historicalMode ? historicalData : nearshoreData;
+
   // ── Log session ──
   const { logSwell } = useSwellLogContext();
-  const lastTapRef = useRef<number>(0);
-  const pinchActiveRef = useRef(false);
   const pagerRef = useRef<ScrollView>(null);
   const pagerInitialized = useRef(false);
   const [snapshotMsg, setSnapshotMsg] = useState('');
@@ -808,29 +989,6 @@ export default function HomeScreen() {
   const [pagerHeight, setPagerHeight] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // ── Double-tap → open Log Session modal ──
-  const handleDoubleTap = useCallback(() => {
-    if (pinchActiveRef.current) return;
-    if (activeScreen !== 0) return;
-    const now = Date.now();
-    if (now - lastTapRef.current < 350) {
-      lastTapRef.current = 0;
-      const buoyId = getSnapshotBuoyId(selectedStation.id);
-      const r = nearshoreData[buoyId];
-      if (r && !isOffline(r.timestamp)) {
-        setLogDate(new Date());
-        setLogMode('now');
-        setLogSpot('');
-        setLogModalVisible(true);
-      } else {
-        setSnapshotMsg('NO DATA');
-        setTimeout(() => setSnapshotMsg(''), 2000);
-      }
-    } else {
-      lastTapRef.current = now;
-    }
-  }, [selectedStation, nearshoreData, activeScreen]);
-
   const handleSaveSession = useCallback(() => {
     const buoyId = getSnapshotBuoyId(selectedStation.id);
     const buoyStation = NEARSHORE_STATIONS.find(s => s.id === buoyId);
@@ -892,6 +1050,12 @@ export default function HomeScreen() {
     }
   }, []);
 
+  const openWindMeter = useCallback(() => {
+    // The real MIC page is virtual index 4 in the looping pager.
+    pagerRef.current?.scrollTo({ x: SCREEN_W * REAL_PAGES, animated: true });
+    setActiveScreen(REAL_PAGES - 1);
+  }, []);
+
   const handleRefresh = useCallback(async () => {
     setIsRefreshing(true);
     await Promise.all([
@@ -938,7 +1102,16 @@ export default function HomeScreen() {
         )
       }
     >
-      <BuoyGrid nearshoreData={nearshoreData} theme={theme} onBuoyPress={handleBuoyPress} />
+      <BuoyGrid
+        nearshoreData={displayedNearshoreData}
+        theme={theme}
+        onBuoyPress={handleBuoyPress}
+        historicalMode={historicalMode}
+        historicalDate={historicalDate}
+        historicalLoading={historicalLoading}
+        onHistoricalDateChange={setHistoricalDate}
+        onHistoricalReveal={revealHistorical}
+      />
       <View style={{ height: TIDE_H, marginTop: -2 }}>
         <View style={{ position: 'absolute', top: 68, left: 0, right: 0, bottom: 0, backgroundColor: theme.background }} />
         <View style={{ height: WIND_INFO_H, justifyContent: 'center', alignItems: 'center', paddingBottom: 30, paddingTop: 80 }}>
@@ -975,16 +1148,7 @@ export default function HomeScreen() {
   );
 
   return (
-    <SafeAreaView
-      style={[styles.safeArea, { backgroundColor: theme.background }]}
-      onTouchStart={(e) => { if (e.nativeEvent.touches.length > 1) pinchActiveRef.current = true; }}
-      onTouchEnd={(e) => {
-        if (e.nativeEvent.touches.length === 0) {
-          if (!pinchActiveRef.current) handleDoubleTap();
-          pinchActiveRef.current = false;
-        }
-      }}
-    >
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.background }]}>
       {/* ── Shared header ── */}
       <View style={styles.header}>
         <View>
@@ -993,17 +1157,37 @@ export default function HomeScreen() {
             NOAA Real-Time Wave Data · {SCREEN_LABELS[activeScreen]}
           </Text>
         </View>
-        <View style={styles.dots}>
-          {SCREEN_LABELS.map((_, i) => (
-            <View
-              key={i}
-              style={[
-                styles.dot,
-                { backgroundColor: theme.accentDim },
-                i === activeScreen && [styles.dotActive, { backgroundColor: theme.accent }],
-              ]}
-            />
-          ))}
+        <View style={styles.headerRight}>
+          {activeScreen === 0 && (
+            <View style={[styles.modeToggle, { borderColor: theme.accentDim }]}>
+              <TouchableOpacity
+                onPress={() => setHistoricalMode(false)}
+                activeOpacity={0.7}
+                style={[styles.modeBtn, !historicalMode && { backgroundColor: theme.accentDim + '55' }]}
+              >
+                <Text style={[styles.modeBtnText, { color: !historicalMode ? theme.accent : theme.muted }]}>LIVE</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setHistoricalMode(true)}
+                activeOpacity={0.7}
+                style={[styles.modeBtn, historicalMode && { backgroundColor: theme.accentDim + '55' }]}
+              >
+                <Text style={[styles.modeBtnText, { color: historicalMode ? theme.accent : theme.muted }]}>HIST</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          <View style={styles.dots}>
+            {SCREEN_LABELS.map((_, i) => (
+              <View
+                key={i}
+                style={[
+                  styles.dot,
+                  { backgroundColor: theme.accentDim },
+                  i === activeScreen && [styles.dotActive, { backgroundColor: theme.accent }],
+                ]}
+              />
+            ))}
+          </View>
         </View>
       </View>
       <View style={[styles.divider, { backgroundColor: theme.accent }]} />
@@ -1042,7 +1226,7 @@ export default function HomeScreen() {
             <ForecastPage height={pagerHeight} theme={theme} stationId={selectedStation.id} />
 
             {/* Page 2: Log Book */}
-            <LogbookPage height={pagerHeight} theme={theme} />
+            <LogbookPage height={pagerHeight} theme={theme} onTakeWindReading={openWindMeter} />
 
             {/* Page 3: Mic Wind */}
             <MicWindScreen key="real-mic" height={pagerHeight} theme={theme} active={activeScreen === REAL_PAGES - 1} />
@@ -1117,6 +1301,27 @@ const styles = StyleSheet.create({
     fontFamily: 'Courier',
     letterSpacing: 1,
     marginTop: 1,
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  modeToggle: {
+    flexDirection: 'row',
+    borderWidth: 1,
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  modeBtn: {
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+  },
+  modeBtnText: {
+    fontFamily: 'Courier',
+    fontWeight: '700',
+    fontSize: 10,
+    letterSpacing: 1.5,
   },
   dots: {
     flexDirection: 'row',

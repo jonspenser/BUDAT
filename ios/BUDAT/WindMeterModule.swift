@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 import React
 import WindCore
 
@@ -19,22 +20,29 @@ final class WindMeterModule: RCTEventEmitter {
     @objc func startMeasuring(_ resolve: @escaping RCTPromiseResolveBlock,
                               rejecter reject: @escaping RCTPromiseRejectBlock) {
         DispatchQueue.main.async {
-            let ctrl = WindMeterController()
-            ctrl.onSweepUpdate = { [weak self] result, heading, levelDb in
-                self?.sendSweepUpdate(result, currentHeadingDegrees: heading, levelDb: levelDb)
-            }
-            ctrl.onHeadingUpdate = { [weak self] heading in
-                self?.sendHeadingUpdate(heading)
-            }
-            ctrl.onEstimateUpdate = { [weak self] estimate in
-                self?.sendEstimateUpdate(estimate)
-            }
-            do {
-                try ctrl.start()
-                self.controller = ctrl
-                resolve(nil)
-            } catch {
-                reject("START_FAILED", error.localizedDescription, error)
+            self.requestMicrophonePermission { granted in
+                guard granted else {
+                    reject("MIC_PERMISSION_DENIED", "Microphone permission is required to measure wind", nil)
+                    return
+                }
+
+                let ctrl = WindMeterController()
+                ctrl.onSweepUpdate = { [weak self] result, heading, levelDb in
+                    self?.sendSweepUpdate(result, currentHeadingDegrees: heading, levelDb: levelDb)
+                }
+                ctrl.onHeadingUpdate = { [weak self] heading in
+                    self?.sendHeadingUpdate(heading)
+                }
+                ctrl.onEstimateUpdate = { [weak self] estimate in
+                    self?.sendEstimateUpdate(estimate)
+                }
+                do {
+                    try ctrl.start()
+                    self.controller = ctrl
+                    resolve(nil)
+                } catch {
+                    reject("START_FAILED", error.localizedDescription, error)
+                }
             }
         }
     }
@@ -85,6 +93,18 @@ final class WindMeterModule: RCTEventEmitter {
     }
 
     // MARK: - Private
+
+    private func requestMicrophonePermission(_ completion: @escaping (Bool) -> Void) {
+        if #available(iOS 17.0, *) {
+            AVAudioApplication.requestRecordPermission { granted in
+                DispatchQueue.main.async { completion(granted) }
+            }
+        } else {
+            AVAudioSession.sharedInstance().requestRecordPermission { granted in
+                DispatchQueue.main.async { completion(granted) }
+            }
+        }
+    }
 
     private func sendSweepUpdate(_ result: SweepResult, currentHeadingDegrees: Double, levelDb: Double) {
         guard hasListeners else { return }

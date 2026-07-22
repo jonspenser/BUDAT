@@ -71,12 +71,16 @@ public final class AudioCaptureEngine {
     public let configuration: Configuration
     /// Delivered on an internal audio queue; hop off it before touching UI.
     public var onWindow: (([Float], Double) -> Void)?
+    /// Fast raw-input level for immediate UI feedback, independent of the
+    /// multi-second feature-analysis window.
+    public var onLevel: ((Double) -> Void)?
     public private(set) var metadata: CaptureMetadata?
     public private(set) var isRunning = false
 
     private let engine = AVAudioEngine()
     private let windower: SampleWindower
     private let queue = DispatchQueue(label: "WindCore.AudioCaptureEngine")
+    private var lastLevelEmission = Date.distantPast
 
     public init(configuration: Configuration = Configuration()) {
         self.configuration = configuration
@@ -129,6 +133,13 @@ public final class AudioCaptureEngine {
                     samples = Self.monoSamples(from: buffer)
                 }
                 guard !samples.isEmpty else { return }
+                let now = Date()
+                if now.timeIntervalSince(self.lastLevelEmission) >= 0.1 {
+                    let meanSquare = samples.reduce(0.0) { $0 + Double($1 * $1) } / Double(samples.count)
+                    let levelDb = 20 * log10(max(sqrt(meanSquare), 1e-9))
+                    self.lastLevelEmission = now
+                    self.onLevel?(levelDb)
+                }
                 self.windower.append(samples)
             }
         }

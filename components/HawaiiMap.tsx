@@ -21,6 +21,8 @@ interface Props {
   nearshoreData: Record<string, BuoyReading | null>;
   theme: Theme;
   onBuoyPress?: (id: string) => void;
+  isHistorical?: boolean;
+  historicalLoading?: boolean;
 }
 
 interface ViewTransform {
@@ -49,7 +51,7 @@ function arrowPoints(cx: number, cy: number, len: number, wid: number, travelDeg
   return pts.map(([px, py]) => `${cx + px * cos - py * sin},${cy + px * sin + py * cos}`).join(' ');
 }
 
-export default function HawaiiMap({ width, height, nearshoreStations, nearshoreData, theme, onBuoyPress }: Props) {
+export default function HawaiiMap({ width, height, nearshoreStations, nearshoreData, theme, onBuoyPress, isHistorical, historicalLoading }: Props) {
   const { lonMin, lonMax, latMin, latMax } = MAP_BOUNDS;
 
   // Zoom/pan happens inside the SVG (vector re-render) so everything stays
@@ -132,10 +134,15 @@ export default function HawaiiMap({ width, height, nearshoreStations, nearshoreD
               const x = bx * zoom + tx + (station.dotOffsetX ?? 0);
               const y = by * zoom + ty + (station.dotOffsetY ?? 0);
               const d = nearshoreData[station.id];
-              const offline = isOffline(d?.timestamp);
-              const hStr = offline ? 'OFFLINE' : formatHeight(d!.SwH ?? d!.WVHT);
+              // Historical rows carry a synthetic mid-year timestamp (not a live
+              // reading time), so "offline" there means "no archive data" instead
+              // of "stale" — and we skip the clock-time label entirely.
+              const offline = isHistorical ? !d : isOffline(d?.timestamp);
+              const hStr = offline
+                ? (isHistorical ? (historicalLoading ? '···' : 'NO DATA') : 'OFFLINE')
+                : formatHeight(d!.SwH ?? d!.WVHT);
               const pStr = offline ? '' : formatPeriod(d!.SwP ?? d!.DPD);
-              const ts   = offline ? '' : formatHawaiiTime(d!.timestamp);
+              const ts   = offline || isHistorical ? '' : formatHawaiiTime(d!.timestamp);
               const dir = offline ? null : (d?.SwD ?? d?.MWD ?? null);
               const travelDeg = dir !== null ? (dir + 180) % 360 : null;
               const dirLabel = dir !== null ? `${Math.round(dir)}°` : '';

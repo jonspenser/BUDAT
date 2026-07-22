@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { fetchWithTimeout } from './fetchWithTimeout';
 
 export interface WindReading {
   stationId: string;
@@ -65,7 +66,7 @@ export function useWindData(stationId: string) {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch(`${NDBC_BASE}${stationId}.txt`, { cache: 'no-store' });
+        const res = await fetchWithTimeout(`${NDBC_BASE}${stationId}.txt`, { cache: 'no-store' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const text = await res.text();
         const parsed = parseWindTxt(text, stationId);

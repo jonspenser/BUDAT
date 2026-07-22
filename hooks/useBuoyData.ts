@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { fetchWithTimeout } from './fetchWithTimeout';
 
 // All fields recovered from Hermes bytecode disassembly of original app
 export interface BuoyReading {
@@ -195,8 +196,8 @@ function displayWaveRows(rows: BuoyReading[]): BuoyReading[] {
 
 export async function fetchBuoyRows(stationId: string): Promise<BuoyReading[]> {
   const [txtRes, specRes] = await Promise.all([
-    fetch(`${NDBC_BASE}${stationId}.txt`, { cache: 'no-store' }),
-    fetch(`${NDBC_BASE}${stationId}.spec`, { cache: 'no-store' }).catch(() => null),
+    fetchWithTimeout(`${NDBC_BASE}${stationId}.txt`, { cache: 'no-store' }),
+    fetchWithTimeout(`${NDBC_BASE}${stationId}.spec`, { cache: 'no-store' }).catch(() => null),
   ]);
 
   if (!txtRes.ok) throw new Error(`HTTP ${txtRes.status}`);

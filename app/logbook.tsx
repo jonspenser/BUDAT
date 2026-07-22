@@ -1138,7 +1138,7 @@ const at = StyleSheet.create({
 
 // ── Logbook content ───────────────────────────────────────────────────────────
 
-function LogbookContent({ height }: { height?: number }) {
+function LogbookContent({ height, onTakeWindReading }: { height?: number; onTakeWindReading: () => void }) {
   const colors = useNbColors();
   const nb = colors.isNight ? nbNight : nbDay;
 
@@ -1232,6 +1232,22 @@ function LogbookContent({ height }: { height?: number }) {
           </View>
         </View>
       )}
+
+      <TouchableOpacity
+        onPress={onTakeWindReading}
+        activeOpacity={0.7}
+        style={{
+          minHeight: 38,
+          alignSelf: 'stretch',
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderBottomWidth: 1,
+          borderBottomColor: colors.ruled,
+          backgroundColor: colors.expandedBg,
+        }}
+      >
+        <Text style={[nb.sortLabel, { color: colors.marginC, fontWeight: '900', letterSpacing: 2 }]}>TAKE WIND READING →</Text>
+      </TouchableOpacity>
 
       {/* Sort tabs on a ruled line */}
       <RuledRow>
@@ -1369,7 +1385,7 @@ export default function LogbookScreen() {
           <View style={{ width: 70 }} />
         </View>
         <PinGate>
-          <LogbookContent />
+          <LogbookContent onTakeWindReading={() => router.push('/micwind')} />
         </PinGate>
       </SafeAreaView>
     </NbColorsContext.Provider>
@@ -1378,11 +1394,11 @@ export default function LogbookScreen() {
 
 // ── Embedded page (tab view, no chrome) ──────────────────────────────────────
 
-export function LogbookPage({ height, theme }: { height: number; theme?: any }) {
+export function LogbookPage({ height, theme, onTakeWindReading }: { height: number; theme?: any; onTakeWindReading: () => void }) {
   return (
     <NbThemeProvider>
       <PinGate>
-        <LogbookContent height={height} />
+        <LogbookContent height={height} onTakeWindReading={onTakeWindReading} />
       </PinGate>
     </NbThemeProvider>
   );

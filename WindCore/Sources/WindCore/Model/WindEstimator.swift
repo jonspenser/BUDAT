@@ -68,24 +68,20 @@ public struct WindEstimator: Codable, Equatable, Sendable {
         try priorModel.fit(samples)
     }
 
-    /// An estimator whose prior is fit to the field-proven mic-level → wind-speed
-    /// curve from the original JS meter, so it produces readings out of the box;
-    /// calibration corrections then personalize on top of it.
+    /// An estimator whose prior is a rough starting guess — a straight line
+    /// from the quietest useful mic level to the loudest, mapped to a
+    /// realistic 3–30kt range — so it produces plausible readings out of the
+    /// box; calibration corrections then personalize on top of it.
     public static func withDefaultPrior() -> WindEstimator {
-        // dBFS → knots at the original DB_BREAKPOINTS (Beaufort lower bounds);
-        // both source mappings were piecewise linear, so these vertices are exact.
-        let curve: [(db: Double, knots: Double)] = [
-            (-58, 0), (-43, 1), (-35, 4), (-28, 7),
-            (-21, 11), (-12, 17), (-5, 22), (-2, 28), (0, 34),
-        ]
+        // -58 dBFS (quietest level the original JS meter treated as
+        // meaningful) → 3kt; 0 dBFS (loudest, near clipping) → 30kt.
+        // Clamped outside that band so silence never reads below 3kt and a
+        // pinned meter never reads above 30kt.
+        let dbLow = -58.0, knotsLow = 3.0
+        let dbHigh = 0.0,  knotsHigh = 30.0
         func knots(at db: Double) -> Double {
-            if db <= curve[0].db { return curve[0].knots }
-            for i in 1..<curve.count where db <= curve[i].db {
-                let (d0, k0) = curve[i - 1]
-                let (d1, k1) = curve[i]
-                return k0 + (db - d0) / (d1 - d0) * (k1 - k0)
-            }
-            return curve[curve.count - 1].knots
+            let t = (min(max(db, dbLow), dbHigh) - dbLow) / (dbHigh - dbLow)
+            return knotsLow + t * (knotsHigh - knotsLow)
         }
         let knotsToMS = 0.514444
         let samples = stride(from: -70.0, through: 3.0, by: 1.0).map { db in
@@ -105,8 +101,17 @@ public struct WindEstimator: Codable, Equatable, Sendable {
     /// cannot extrapolate wildly on silence or clipping.
     static func augmented(_ features: [String: Double]) -> [String: Double] {
         var output = features
-        if output["rmsDb"] == nil, let rms = output["rms"] {
-            output["rmsDb"] = 20 * log10(max(rms, 1e-9))
+        // `estimate(features:)` is fed both raw single-window vectors (key
+        // "rms") and session-aggregated vectors from `aggregateFeatureVector`
+        // (keys "mean.rms" / "median.rms" / …) — the prior was fit on a flat
+        // "rmsDb", so without this fallback the aggregated path always missed
+        // the level entirely and BayesianRidge silently defaulted it to 0,
+        // pinning every live estimate to the same ~34kt (0 dBFS) prediction.
+        if output["rmsDb"] == nil {
+            let rms = output["rms"] ?? output["mean.rms"] ?? output["median.rms"]
+            if let rms {
+                output["rmsDb"] = 20 * log10(max(rms, 1e-9))
+            }
         }
         if let db = output["rmsDb"] {
             let clamped = min(max(db, -70), 3)

@@ -14,7 +14,15 @@ final class WindMeterController {
     private let sessionConfig = AudioSessionConfigurator()
     private var captureEngine: AudioCaptureEngine?
     private let featureExtractor = FeatureExtractor()
-    private let sweepAnalyzer = SweepAnalyzer()
+    /// Coverage thresholds tuned for the guided ±90° arc (~180° of headings,
+    /// half the circle) that MicWindScreen walks the user through — the
+    /// defaults assume a full-circle scan and would never classify.
+    private let sweepAnalyzer: SweepAnalyzer = {
+        var config = SweepAnalyzer.Configuration()
+        config.minCoverage = 0.45
+        config.failCoverage = 0.90
+        return SweepAnalyzer(configuration: config)
+    }()
     private var windEstimator = WindEstimator.withDefaultPrior()
     private let headingProvider = DeviceHeadingProvider()
     private let modelQueue = DispatchQueue(label: "WindMeter.model")
@@ -71,6 +79,17 @@ final class WindMeterController {
         headingProvider.start()
 
         let engine = AudioCaptureEngine()
+        engine.onLevel = { [weak self] levelDb in
+            guard let self else { return }
+            let heading = self.windowHeading()
+            self.modelQueue.async { [weak self] in
+                guard let self else { return }
+                let current = self.sweepAnalyzer.currentResult
+                DispatchQueue.main.async { [weak self] in
+                    self?.onSweepUpdate?(current, heading, levelDb)
+                }
+            }
+        }
         engine.onWindow = { [weak self] samples, offset in
             self?.processWindow(samples: samples, offset: offset)
         }
@@ -271,7 +290,17 @@ final class WindMeterController {
             correctionBuffer.append(windowRecord)
         }
 
-        guard quality.isUsable else { return }
+        // Mic level in dBFS — the JS level meter needs this even for windows
+        // the quality gates reject, or the meter freezes during handling noise.
+        let levelDb = 20 * log10(max(features.rms, 1e-9))
+
+        guard quality.isUsable else {
+            let current = sweepAnalyzer.currentResult
+            DispatchQueue.main.async { [weak self] in
+                self?.onSweepUpdate?(current, heading, levelDb)
+            }
+            return
+        }
 
         liveWindows.append(windowRecord)
         if liveWindows.count > liveWindowCapacity {
@@ -286,8 +315,6 @@ final class WindMeterController {
             correctionBufferStart = Date()
         }
 
-        // Mic level in dBFS so the JS layer can drive pan guidance
-        let levelDb = 20 * log10(max(features.rms, 1e-9))
         DispatchQueue.main.async { [weak self] in
             self?.onSweepUpdate?(sweepResult, heading, levelDb)
         }
