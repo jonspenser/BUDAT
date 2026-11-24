@@ -39,3 +39,6 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# swell library raw NOAA downloads
+scripts/swell/.cache/
